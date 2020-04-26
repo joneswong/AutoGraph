@@ -1,0 +1,8 @@
+end_time: 1587886842.078646
+ingestion_duration: 56.16789627075195
+time_stats:
+  train_predict:
+    max: 56.16789627075195
+    mean: 56.16789627075195
+    std: 0.0
+    sum: 56.16789627075195

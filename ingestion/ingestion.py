@@ -71,7 +71,7 @@ def _parse_args():
     parser.add_argument('--code_dir', type=str,
                         default=default_code_dir,
                         help="Directory storing the submission code "
-                             "`model.py` and other necessary packages.")
+                             "`model_daoyuan.py` and other necessary packages.")
     parser.add_argument('--score_dir', type=str,
                         default=default_score_dir,
                         help="Directory storing the scoring output "
