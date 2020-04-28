@@ -1,131 +1,79 @@
-"""the simple baseline for autograph"""
-
-import numpy as np
-import pandas as pd
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import torch
-import torch.nn.functional as F
-from torch.nn import Linear
-from torch_geometric.nn import GCNConv, JumpingKnowledge
-from torch_geometric.data import Data
 
-import random
-def fix_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
+from spaces import Categoric
+from schedulers import Scheduler
+from early_stoppers import ConstantStopper
+from algorithms import GCNAlgo
+from ensemblers import GreedyStrategy
+from utils import fix_seed, generate_pyg_data
+
+FRAC_FOR_SEARCH=0.85
+# TO DO: empirically check the correctness of seeding
 fix_seed(1234)
 
 
-class GCN(torch.nn.Module):
-
-    def __init__(self, num_layers=2, hidden=16,  features_num=16, num_class=2):
-        super(GCN, self).__init__()
-        self.conv1 = GCNConv(features_num, hidden)
-        self.convs = torch.nn.ModuleList()
-        for i in range(num_layers - 1):
-            self.convs.append(GCNConv(hidden, hidden))
-        self.lin2 = Linear(hidden, num_class)
-        self.first_lin = Linear(features_num, hidden)
-
-    def reset_parameters(self):
-        self.first_lin.reset_parameters()
-        self.conv1.reset_parameters()
-        for conv in self.convs:
-            conv.reset_parameters()
-        self.lin2.reset_parameters()
-
-    def forward(self, data):
-        x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
-        x = F.relu(self.first_lin(x))
-        x = F.dropout(x, p=0.5, training=self.training)
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.lin2(x)
-        return F.log_softmax(x, dim=-1)
-
-    def __repr__(self):
-        return self.__class__.__name__
-
-
-class Model:
+class Model(object):
 
     def __init__(self):
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        """Constructor
+        only `train_predict()` is measured for timing, put as much stuffs
+        here as possible
+        """
 
+        self.device = torch.device('cuda:0' if torch.cuda.
+                                   is_available() else 'cpu')
+        self._hyperparam_space = dict(
+            algo=Categoric([GCNAlgo], [GCNAlgo.hyperparam_space], GCNAlgo))
+        # used by the scheduler for deciding when to stop each trial
+        early_stopper = ConstantStopper(max_step=800)
+        # schedulers conduct HPO
+        self._scheduler = Scheduler(self._hyperparam_space, early_stopper)
+        # ensemble the promising models searched
+        self._ensembler = GreedyStrategy(finetune=False)
 
-    def generate_pyg_data(self, data):
+    def train_predict(self, data, time_budget, n_class, schema):
+        """the only way ingestion interacts with user script"""
 
-        x = data['fea_table']
-        if x.shape[1] == 1:
-            x = x.to_numpy()
-            x = x.reshape(x.shape[0])
-            x = np.array(pd.get_dummies(x))
-        else:
-            x = x.drop('node_index', axis=1).to_numpy()
+        self._scheduler.setup_timer(time_budget)
+        # TO DO: apply feature engineering to the data in a pluggable way
+        data = generate_pyg_data(data).to(self.device)
+        # TO DO: implement some method/class for splitting the data
+        train_data, early_stop_valid_data, valid_data = data, None, data
 
-        x = torch.tensor(x, dtype=torch.float)
+        algo = None
+        while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
+            if algo:
+                # within a trial, just continue the training
+                train_info = algo.train(train_data)
+                if early_stop_valid_data:
+                    early_stop_valid_info = algo.valid(early_stop_valid_data)
+                else:
+                    early_stop_valid_info = None
+                if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
+                    valid_info = algo.valid(valid_data)
+                    self._scheduler.record(algo, valid_info)
+                    algo = None
+            else:
+                # trigger a new trial
+                config = self._scheduler.get_next_config()
+                if config:
+                    algo = config["algo"][0](
+                        n_class, data.x.size()[1], self.device, config["algo"][1])
+                else:
+                    # have exhausted the search space
+                    break
+        if algo is not None:
+            valid_info = algo.valid(valid_data)
+            self._scheduler.record(algo, valid_info)
+        
+        final_algo = self._ensembler.boost(
+            n_class, data.x.size()[1], self.device,
+            data, self._scheduler.get_results())
 
-        df = data['edge_file']
-        edge_index = df[['src_idx', 'dst_idx']].to_numpy()
-        edge_index = sorted(edge_index, key=lambda d: d[0])
-        edge_index = torch.tensor(edge_index, dtype=torch.long).transpose(0, 1)
-
-        edge_weight = df['edge_weight'].to_numpy()
-        edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
-
-        num_nodes = x.size(0)
-        y = torch.zeros(num_nodes, dtype=torch.long)
-        inds = data['train_label'][['node_index']].to_numpy()
-        train_y = data['train_label'][['label']].to_numpy()
-        y[inds] = torch.tensor(train_y, dtype=torch.long)
-
-        train_indices = data['train_indices']
-        test_indices = data['test_indices']
-
-        data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
-
-        data.num_nodes = num_nodes
-
-        train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        train_mask[train_indices] = 1
-        data.train_mask = train_mask
-
-        test_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        test_mask[test_indices] = 1
-        data.test_mask = test_mask
-        return data
-
-    def train(self, data):
-        model = GCN(features_num=data.x.size()[1], num_class=int(max(data.y)) + 1)
-        model = model.to(self.device)
-        data = data.to(self.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=5e-4)
-
-        min_loss = float('inf')
-        for epoch in range(1,800):
-            model.train()
-            optimizer.zero_grad()
-            loss = F.nll_loss(model(data)[data.train_mask], data.y[data.train_mask])
-            loss.backward()
-            optimizer.step()
-        return model
-
-    def pred(self, model, data):
-        model.eval()
-        data = data.to(self.device)
-        with torch.no_grad():
-            pred = model(data)[data.test_mask].max(1)[1]
-        return pred
-
-    def train_predict(self, data, time_budget,n_class,schema):
-
-
-        data = self.generate_pyg_data(data)
-        model = self.train(data)
-        pred = self.pred(model, data)
+        pred = final_algo.pred(data)
 
         return pred.cpu().numpy().flatten()
