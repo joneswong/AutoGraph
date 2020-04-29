@@ -5,9 +5,6 @@ from __future__ import print_function
 import time
 import copy
 
-import numpy as np
-import torch
-
 from spaces import Categoric, Numeric
 
 
@@ -44,19 +41,7 @@ class Scheduler(object):
         """
 
         self._early_stopper.reset()
-        def get_default(sp):
-            results = dict()
-            for k, v in sp.items():
-                if isinstance(v, Numeric):
-                    results[k] = v.default_value
-                else:
-                    if v.subspaces:
-                        results[k] = (v.default_value, \
-                            get_default(v.subspaces[v.categories.index(v.default_value)]))
-                    else:
-                        results[k] = v.default_value
-            return results
-        self._cur_config = get_default(self._hyperparam_space)
+        self._cur_config = self.get_default()
         return self._cur_config if len(self._results) == 0 else None
 
     def should_stop_trial(self, train_info, early_stop_valid_info):
@@ -67,7 +52,19 @@ class Scheduler(object):
     def record(self, algo, valid_info):
         path = "team_common_hpo_{}.pt".format(len(self._results))
         algo.save_model(path)
-        self._results.append((self._cur_config, path, valid_info))
+        self._results.append((copy.deepcopy(self._cur_config), path, valid_info))
 
     def get_results(self):
         return self._results
+
+    def get_default(self):
+        results = dict()
+        for k, v in self._hyperparam_space.items():
+            if isinstance(v, Numeric):
+                results[k] = v.default_value
+            else:
+                if v.subspaces:
+                    results[k] = (v.default_value, self.get_default(v.subspaces[v.categories.index(v.default_value)]))
+                else:
+                    results[k] = v.default_value
+        return results

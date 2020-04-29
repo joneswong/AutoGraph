@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import random
-
 import numpy as np
 import pandas as pd
 import torch
@@ -59,3 +58,9 @@ def generate_pyg_data(data):
     test_mask[test_indices] = 1
     data.test_mask = test_mask
     return data
+
+
+def get_performance(valid_info):
+    # the larger, the better
+    # naive implementation
+    return -valid_info['logloss']+0.1*valid_info['accuracy']

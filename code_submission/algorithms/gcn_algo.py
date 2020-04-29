@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv, JumpingKnowledge
+from sklearn.metrics import accuracy_score
 
 from spaces import Categoric, Numeric
 
@@ -17,7 +18,8 @@ class GCN(torch.nn.Module):
                  num_class,
                  features_num,
                  num_layers=2,
-                 hidden=16):
+                 hidden=16,
+                 dropout_rate=0.5):
 
         super(GCN, self).__init__()
         self.conv1 = GCNConv(features_num, hidden)
@@ -26,6 +28,7 @@ class GCN(torch.nn.Module):
             self.convs.append(GCNConv(hidden, hidden))
         self.lin2 = Linear(hidden, num_class)
         self.first_lin = Linear(features_num, hidden)
+        self.dropout_rate = dropout_rate
 
     def reset_parameters(self):
         self.first_lin.reset_parameters()
@@ -37,10 +40,10 @@ class GCN(torch.nn.Module):
     def forward(self, data):
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
         x = F.relu(self.first_lin(x))
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
         for conv in self.convs:
             x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-        x = F.dropout(x, p=0.5, training=self.training)
+        x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = self.lin2(x)
         return F.log_softmax(x, dim=-1)
 
@@ -52,8 +55,9 @@ class GCNAlgo(object):
     """Encapsulate the torch.Module and the train&valid&test routines"""
 
     hyperparam_space = dict(
-        num_layers=Numeric((), np.int32, 1, 4, 2),
-        hidden=Numeric((), np.int32, 4, 32, 16),
+        num_layers=Categoric(list(range(2,5)), None, 2),
+        hidden=Categoric([16, 32, 64, 128], None, 16),
+        dropout_rate=Numeric((), np.float32, 0.2, 0.6, 0.5),
         lr=Numeric((), np.float32, 1e-5, 1e-2, 5e-3),
         weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4))
 
@@ -68,7 +72,7 @@ class GCNAlgo(object):
         self._device = device
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16)).to(device)
+            config.get("hidden", 16), config.get("dropout_rate", 0.5)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
@@ -83,12 +87,19 @@ class GCNAlgo(object):
         self._optimizer.step()
         # We may need values other than logloss for making better decisions on
         # when to stop the training course
-        return {"logloss": loss}
+        return {"logloss": loss.item()}
 
     def valid(self, data):
         self.model.eval()
-        # TO DO: implement
-        return {"logloss": .0, "accuracy": 1.0}
+        with torch.no_grad():
+            validation_output = self.model(data)[data.train_mask]
+            validation_pre = validation_output.max(1)[1]
+            validation_truth = data.y[data.train_mask]
+            logloss = F.nll_loss(validation_output, validation_truth)
+
+        cpu = torch.device('cpu')
+        accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
+        return {"logloss": logloss.item(), "accuracy": accuracy}
     
     def pred(self, data):
         self.model.eval()
