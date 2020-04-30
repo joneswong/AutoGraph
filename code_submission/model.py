@@ -12,13 +12,13 @@ from early_stoppers import ConstantStopper
 from early_stoppers import StableStopper
 from algorithms import GCNAlgo
 from ensemblers import GreedyStrategy
-from utils import fix_seed, generate_pyg_data
+from utils import fix_seed, generate_pyg_data, divide_data
 
-FRAC_FOR_SEARCH=0.85
 ALGO = GCNAlgo
 STOPPER = StableStopper
 SCHEDULER = BayesianOptimizer
 ENSEMBLER = GreedyStrategy
+FRAC_FOR_SEARCH=0.85
 
 # TO DO: empirically check the correctness of seeding
 fix_seed(1234)
@@ -53,20 +53,16 @@ class Model(object):
         self._scheduler.setup_timer(time_budget)
         # TO DO: apply feature engineering to the data in a pluggable way
         data = generate_pyg_data(data).to(self.device)
-        # TO DO: implement some method/class for splitting the data
-        train_data, early_stop_valid_data, valid_data = data, data, data
+        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7,1,2])
 
         algo = None
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
             if algo:
                 # within a trial, just continue the training
-                train_info = algo.train(train_data)
-                if early_stop_valid_data:
-                    early_stop_valid_info = algo.valid(early_stop_valid_data)
-                else:
-                    early_stop_valid_info = None
+                train_info = algo.train(data, train_mask)
+                early_stop_valid_info = algo.valid(data, early_valid_mask)
                 if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
-                    valid_info = algo.valid(valid_data)
+                    valid_info = algo.valid(data, final_valid_mask)
                     self._scheduler.record(algo, valid_info)
                     algo = None
             else:
@@ -78,7 +74,7 @@ class Model(object):
                     # have exhausted the search space
                     break
         if algo is not None:
-            valid_info = algo.valid(valid_data)
+            valid_info = algo.valid(data, final_valid_mask)
             self._scheduler.record(algo, valid_info)
         
         final_algo = self._ensembler.boost(

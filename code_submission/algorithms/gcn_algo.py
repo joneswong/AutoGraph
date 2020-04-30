@@ -58,7 +58,7 @@ class GCNAlgo(object):
         num_layers=Categoric(list(range(2,5)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 16),
         dropout_rate=Numeric((), np.float32, 0.2, 0.6, 0.5),
-        lr=Numeric((), np.float32, 1e-5, 1e-2, 5e-3),
+        lr=Numeric((), np.float32, 1e-4, 1e-2, 5e-3),
         weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4))
 
     def __init__(self,
@@ -78,23 +78,23 @@ class GCNAlgo(object):
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
         
-    def train(self, data):
+    def train(self, data, data_mask):
         self.model.train()
         self._optimizer.zero_grad()
         loss = F.nll_loss(
-            self.model(data)[data.train_mask], data.y[data.train_mask])
+            self.model(data)[data_mask], data.y[data_mask])
         loss.backward()
         self._optimizer.step()
         # We may need values other than logloss for making better decisions on
         # when to stop the training course
         return {"logloss": loss.item()}
 
-    def valid(self, data):
+    def valid(self, data, data_mask):
         self.model.eval()
         with torch.no_grad():
-            validation_output = self.model(data)[data.train_mask]
+            validation_output = self.model(data)[data_mask]
             validation_pre = validation_output.max(1)[1]
-            validation_truth = data.y[data.train_mask]
+            validation_truth = data.y[data_mask]
             logloss = F.nll_loss(validation_output, validation_truth)
 
         cpu = torch.device('cpu')
