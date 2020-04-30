@@ -49,6 +49,8 @@ def generate_pyg_data(data):
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
 
     data.num_nodes = num_nodes
+    data.train_indices = train_indices
+    data.test_indices = test_indices
 
     train_mask = torch.zeros(num_nodes, dtype=torch.bool)
     train_mask[train_indices] = 1
@@ -64,3 +66,27 @@ def get_performance(valid_info):
     # the larger, the better
     # naive implementation
     return -valid_info['logloss']+0.1*valid_info['accuracy']
+
+def divide_data(data, split_rates):
+    assert len(split_rates) == 3
+
+    indices = np.array(data.train_indices)
+    np.random.shuffle(indices)
+
+    split_thred = []
+    accumulated_rate = 0
+    for r in split_rates:
+        accumulated_rate += r
+        split_thred.append(int(len(indices)*accumulated_rate/np.sum(split_rates)))
+
+    train_indices = indices[:split_thred[0]]
+    early_valid_indices = indices[split_thred[0]:split_thred[1]]
+    final_valid_indices = indices[split_thred[1]:]
+
+    train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+    train_mask[train_indices] = 1
+    early_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+    early_valid_mask[early_valid_indices] = 1
+    final_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+    final_valid_mask[final_valid_indices] = 1
+    return train_mask, early_valid_mask, final_valid_mask
