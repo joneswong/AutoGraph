@@ -110,5 +110,8 @@ class GCNAlgo(object):
     def save_model(self, path):
         torch.save(self.model.state_dict(), path)
 
-    def load_model(self, path):
-        self.model.load_state_dict(torch.load(path, map_location=self._device))
+    def load_model(self, path, filter_out=False, strict=True):
+        prev_state_dict = torch.load(path, map_location=self._device)
+        if filter_out:
+            prev_state_dict = {k: v for k, v in prev_state_dict.items() if k in self.model.state_dict()}
+        self.model.load_state_dict(prev_state_dict, strict=strict)

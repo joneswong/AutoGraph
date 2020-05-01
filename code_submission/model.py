@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
 import torch
 
 from spaces import Categoric
@@ -13,6 +15,15 @@ from early_stoppers import StableStopper
 from algorithms import GCNAlgo
 from ensemblers import GreedyStrategy
 from utils import fix_seed, generate_pyg_data, divide_data
+
+logger = logging.getLogger(__name__)
+logger.setLevel('DEBUG')
+handler = logging.StreamHandler()
+handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s\t%(levelname)s %(filename)s: %(message)s"))
+logger.addHandler(handler)
+logger.propagate = False
 
 ALGO = GCNAlgo
 STOPPER = StableStopper
@@ -54,6 +65,7 @@ class Model(object):
         # TO DO: apply feature engineering to the data in a pluggable way
         data = generate_pyg_data(data).to(self.device)
         train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7,1,2])
+        logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
 
         algo = None
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
@@ -76,10 +88,12 @@ class Model(object):
         if algo is not None:
             valid_info = algo.valid(data, final_valid_mask)
             self._scheduler.record(algo, valid_info)
+        logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
         
         final_algo = self._ensembler.boost(
             n_class, data.x.size()[1], self.device,
             data, self._scheduler.get_results(), ALGO)
+        logger.info("remaining {}s after ensemble".format(self._scheduler.get_remaining_time()))
 
         pred = final_algo.pred(data)
 
