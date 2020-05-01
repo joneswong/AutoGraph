@@ -17,6 +17,7 @@ def fix_seed(seed):
 	torch.cuda.manual_seed_all(seed)
 	torch.backends.cudnn.deterministic = True
 
+
 def generate_pyg_data(data):
 
 	x = data['fea_table']
@@ -45,7 +46,6 @@ def generate_pyg_data(data):
 	if x.shape[1] == 1:
 		added_feature = feature_generation(x, edge_index)
 		x = np.concatenate([x, added_feature], axis=1)
-	#print(x.shape)
 	
 	x = torch.tensor(x, dtype=torch.float)
 

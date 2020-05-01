@@ -11,6 +11,7 @@ from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from torch_geometric.utils import degree
 
+
 def _pca_processing(data, pca_threshold=0.75):
 	if data.shape[1] == 0:
 		return data
@@ -19,7 +20,6 @@ def _pca_processing(data, pca_threshold=0.75):
 	return data
 
 def dim_reduction(x, sparse_threshold=0.9, pca_threshold=0.75):
-
 	#remove uninformative col
 	index_col = x['node_index']
 	drop_col = [col for col in x.columns if x[col].var() == 0] + ['node_index']
@@ -40,7 +40,7 @@ def dim_reduction(x, sparse_threshold=0.9, pca_threshold=0.75):
 	return pre_x
 
 def feature_generation(x, edge_index):
-	# node degree
+	# new_feature: node degree
 	row, col = edge_index
 	node_degree = degree(row, x.shape[0])
 
