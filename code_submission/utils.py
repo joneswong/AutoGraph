@@ -18,7 +18,7 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data):
+def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True, sparse_threshold=0.9, pca_threshold=0.75):
 
     x = data['fea_table']
 
@@ -41,9 +41,10 @@ def generate_pyg_data(data):
     test_indices = data['test_indices']
 
     ###   feature engineering  ###
-    x = dim_reduction(x, sparse_threshold=0.9, pca_threshold=0.75)
+    if use_dim_reduction:
+        x = dim_reduction(x, sparse_threshold, pca_threshold)
 
-    if x.shape[1] == 1:
+    if x.shape[1] == 1 and use_feature_generation:
         added_feature = feature_generation(x, edge_index)
         x = np.concatenate([x, added_feature], axis=1)
     
