@@ -19,3 +19,6 @@ class Stopper(object):
         Returns: True or False accoridng to the decision
         """
         raise NotImplementedError
+
+    def get_cur_step(self):
+        return self._cur_step

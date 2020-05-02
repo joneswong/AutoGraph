@@ -36,7 +36,7 @@ class BayesianOptimizer(Scheduler):
             f=None,
             pbounds=pbounds,
             verbose=2,
-            # random_state=1,
+            random_state=1,
         )
 
         self.utility = UtilityFunction(kind="ucb", kappa=2.5, xi=0.0)

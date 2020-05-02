@@ -25,6 +25,10 @@ class Scheduler(object):
         self._start_time = time.time()
         self._time_budget = time_budget
 
+    def get_remaining_time(self):
+        cur = time.time()
+        return self._time_budget - cur + self._start_time
+
     def should_stop(self, frac_for_search=0.85):
         """Judge whether the HPO procedure should be stopped
         Arguments:
