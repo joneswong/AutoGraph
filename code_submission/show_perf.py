@@ -16,8 +16,8 @@ args = parser.parse_args()
 def main():
     exp_accs = list()
     exp_durs = list()
-    acc_reg = re.compile("INFO timing\.py: train_predict success, time spent (\d+\.\d*) sec")
-    dur_reg = re.compile("INFO score\.py: accuracy: (\d+\.\d*)")
+    acc_reg = re.compile("INFO score\.py: accuracy: (\d+\.\d*)")
+    dur_reg = re.compile("INFO timing\.py: train_predict success, time spent (\d+\.\d*) sec")
     for i in range(args.num_exp):
         accs = list()
         durs = list()
@@ -31,7 +31,7 @@ def main():
                 result = dur_reg.search(line)
                 if result:
                     durs.append(float(result.group(1)))
-        assert len(accs)==len(durs) and len(accs)==args.num_exp, "Invalid experiment results {} {}!".format(len(accs), len(durs))
+        assert len(accs)==len(durs) and len(accs)==args.num_exp, "Invalid experiment results {} {} of {}-th exp!".format(len(accs), len(durs), i+1)
         exp_accs.append(accs)
         exp_durs.append(durs)
     mean_acc = np.mean(exp_accs, 0)

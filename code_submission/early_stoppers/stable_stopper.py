@@ -2,10 +2,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
 import numpy as np
 
 from early_stoppers import Stopper
 from utils import get_performance
+
+logger = logging.getLogger('code_submission')
 
 # be very careful when setting STOP_STD
 # (highly related to the adopted performance evaluation function)
@@ -30,5 +34,6 @@ class StableStopper(Stopper):
         self.index = (self.index + 1) % WINDOW_SIZE
         if self.performance_windows[self.index] is not None and \
                 np.std(self.performance_windows) < STOP_STD:
+            logger.info("early stop at {} epoch".format(self._cur_step))
             return True
         return self._cur_step >= self._max_step

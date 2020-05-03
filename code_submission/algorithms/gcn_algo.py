@@ -101,10 +101,13 @@ class GCNAlgo(object):
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
         return {"logloss": logloss.item(), "accuracy": accuracy}
     
-    def pred(self, data):
+    def pred(self, data, make_decision=True):
         self.model.eval()
         with torch.no_grad():
-            pred = self.model(data)[data.test_mask].max(1)[1]
+            if make_decision:
+                pred = self.model(data)[data.test_mask].max(1)[1]
+            else:
+                pred = self.model(data)[data.test_mask]
         return pred
 
     def save_model(self, path):
