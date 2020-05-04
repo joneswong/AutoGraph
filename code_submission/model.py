@@ -3,18 +3,16 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
+import time
 
 import torch
 
 from schedulers import Scheduler, GridSearcher, BayesianOptimizer
 from early_stoppers import ConstantStopper
 from early_stoppers import StableStopper
-# from algorithms import GraphSAINTRandomWalkSampler
-from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
-from ensemblers import GreedyStrategy
-from utils import fix_seed, generate_pyg_data, generate_pyg_data_feature_transform, \
-    divide_data, hyperparam_space_tostr
-
+from algorithms import GCNAlgo
+from ensemblers import Ensembler
+from utils import fix_seed, generate_pyg_data
 
 logger = logging.getLogger(__name__)
 logger.setLevel('DEBUG')
@@ -31,7 +29,7 @@ STOPPERs = [StableStopper, ConstantStopper]
 STOPPER = STOPPERs[1]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler]
 SCHEDULER = SCHEDULERs[2]
-ENSEMBLER = GreedyStrategy
+ENSEMBLER = Ensembler
 FEATURE_ENGINEERING = False
 FRAC_FOR_SEARCH = 0.85
 
@@ -52,17 +50,19 @@ class Model(object):
 
         self.device = torch.device('cuda:0' if torch.cuda.
                                    is_available() else 'cpu')
-        self._hyperparam_space = ALGO.hyperparam_space
+        # so tricky...
+        a_cpu = torch.ones((10,), dtype=torch.float32)
+        a_gpu = a_cpu.to(self.device)
 
+        self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
         early_stopper = STOPPER(max_step=800)
-
+        # ensemble the promising models searched
+        ensembler = ENSEMBLER(
+            config_selection='greedy', training_strategy='cv')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, early_stopper)
-
-        # ensemble the promising models searched
-        self._ensembler = ENSEMBLER(finetune=False)
+        self._scheduler = SCHEDULER(self._hyperparam_space, early_stopper, ensembler)
 
         logger.info('FRAC_FOR_SEARCH: %s', FRAC_FOR_SEARCH)
         logger.info('Feature engineering: %s', FEATURE_ENGINEERING)
@@ -103,13 +103,10 @@ class Model(object):
             valid_info = algo.valid(data, final_valid_mask)
             self._scheduler.record(algo, valid_info)
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
-        
-        final_algo = self._ensembler.boost(
-            n_class, data.x.size()[1], self.device,
-            data, self._scheduler.get_results(), ALGO)
+
+        pred = self._scheduler.pred(
+            n_class, data.x.size()[1], self.device, data, ALGO, True)
         logger.info("remaining {}s after ensemble".format(self._scheduler.get_remaining_time()))
 
-        pred = final_algo.pred(data)
-
-        return pred.cpu().numpy().flatten()
+        return pred
 

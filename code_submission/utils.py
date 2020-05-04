@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+import time
 import random
 import numpy as np
 import pandas as pd
@@ -17,8 +19,8 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-# todo: profile the data loading
 def generate_pyg_data(data):
+
     x = data['fea_table']
     if x.shape[1] == 1:
         x = x.to_numpy()
@@ -37,7 +39,7 @@ def generate_pyg_data(data):
     edge_weight = df['edge_weight'].to_numpy()
     edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
 
-    num_nodes = x.size(0)
+    num_nodes = x.shape[0]
     y = torch.zeros(num_nodes, dtype=torch.long)
     inds = data['train_label'][['node_index']].to_numpy()
     train_y = data['train_label'][['label']].to_numpy()
@@ -115,9 +117,17 @@ def get_performance(valid_info):
     # naive implementation
     return -valid_info['logloss']+0.1*valid_info['accuracy']
 
-def divide_data(data, split_rates):
-    assert len(split_rates) == 3
 
+def hyperparam_space_tostr(hyperparam_space):
+    hyperparam_space_str = '\n'
+    for k, v in hyperparam_space.items():
+        hyperparam_space_str = hyperparam_space_str + "%-15s: %s\n" % (k, v.desc())
+    return hyperparam_space_str
+
+
+
+def divide_data(data, split_rates, device):
+    # divide training data into several partitions
     indices = np.array(data.train_indices)
     np.random.shuffle(indices)
 
@@ -127,22 +137,16 @@ def divide_data(data, split_rates):
         accumulated_rate += r
         split_thred.append(int(len(indices)*accumulated_rate/np.sum(split_rates)))
 
-    train_indices = indices[:split_thred[0]]
-    early_valid_indices = indices[split_thred[0]:split_thred[1]]
-    final_valid_indices = indices[split_thred[1]:]
+    all_indices = list()
+    prev = 0
+    for i, end in enumerate(split_thred):
+        part_indices = indices[prev:end] if i < len(split_thred)-1 else indices[prev:]
+        prev = end
+        all_indices.append(part_indices)
 
-    train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    train_mask[train_indices] = 1
-    early_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    early_valid_mask[early_valid_indices] = 1
-    final_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    final_valid_mask[final_valid_indices] = 1
-    return train_mask, early_valid_mask, final_valid_mask
-
-
-def hyperparam_space_tostr(hyperparam_space):
-    hyperparam_space_str = '\n'
-    for k, v in hyperparam_space.items():
-        hyperparam_space_str = hyperparam_space_str + "%-15s: %s\n" % (k, v.desc())
-    return hyperparam_space_str
-
+    masks = list()
+    for i in range(len(all_indices)):
+        part_masks = torch.zeros(data.num_nodes, dtype=torch.bool)
+        part_masks[all_indices[i]] = 1
+        masks.append(part_masks.to(device))
+    return tuple(masks)

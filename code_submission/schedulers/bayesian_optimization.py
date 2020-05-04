@@ -15,10 +15,11 @@ class BayesianOptimizer(Scheduler):
 
     def __init__(self,
                  hyperparam_space,
-                 early_stopper):
+                 early_stopper,
+                 ensembler):
 
         super(BayesianOptimizer, self).__init__(
-            hyperparam_space, early_stopper)
+            hyperparam_space, early_stopper, ensembler)
 
         pbounds = {}
         for key, value in self._hyperparam_space.items():

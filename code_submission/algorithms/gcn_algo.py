@@ -4,8 +4,9 @@ from __future__ import print_function
 
 import numpy as np
 import torch
-from torch.nn import Linear, functional as F
-from torch_geometric.nn import GCNConv
+import torch.nn.functional as F
+from torch.nn import Linear
+from torch_geometric.nn import GCNConv, JumpingKnowledge
 from sklearn.metrics import accuracy_score
 
 from spaces import Categoric, Numeric
@@ -78,8 +79,8 @@ class GNNAlgo(object):
             self.model.parameters(),
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
-
-    def train(self, data, data_mask):
+        
+    def train(self, data):
         self.model.train()
         self._optimizer.zero_grad()
         loss = F.nll_loss(
@@ -102,10 +103,13 @@ class GNNAlgo(object):
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
         return {"logloss": logloss.item(), "accuracy": accuracy}
     
-    def pred(self, data):
+    def pred(self, data, make_decision=True):
         self.model.eval()
         with torch.no_grad():
-            pred = self.model(data)[data.test_mask].max(1)[1]
+            if make_decision:
+                pred = self.model(data)[data.test_mask].max(1)[1]
+            else:
+                pred = self.model(data)[data.test_mask]
         return pred
 
     def save_model(self, path):
