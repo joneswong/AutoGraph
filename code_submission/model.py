@@ -8,13 +8,8 @@ import time
 import torch
 
 from spaces import Categoric
-from schedulers import Scheduler
-from schedulers import GridSearcher
-from schedulers import BayesianOptimizer
-from schedulers import GeneticOptimizer
-from early_stoppers import ConstantStopper
-from early_stoppers import StableStopper
-from early_stoppers import MemoryStopper
+from schedulers import *
+from early_stoppers import *
 from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import fix_seed, generate_pyg_data, divide_data
@@ -30,7 +25,7 @@ logger.propagate = False
 
 ALGO = GCNAlgo
 HPO_STOPPER = MemoryStopper
-ENSEMBLER_STOPPER = StableStopper
+ENSEMBLER_STOPPER = NonImprovementStopper
 SCHEDULER = GeneticOptimizer
 ENSEMBLER = Ensembler
 FRAC_FOR_SEARCH=0.75

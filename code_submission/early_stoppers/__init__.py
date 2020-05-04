@@ -6,13 +6,17 @@ from early_stoppers.stopper import Stopper
 from early_stoppers.constant_stopper import ConstantStopper
 from early_stoppers.stable_stopper import StableStopper
 from early_stoppers.memory_stopper import MemoryStopper
+from early_stoppers.empirical_stopper import EmpiricalStopper
+from early_stoppers.non_improvement_stopper import NonImprovementStopper
 
 
 agents = dict(
     Stopper=Stopper,
     ConstantStopper=ConstantStopper,
     StableStopper=StableStopper,
-    MemoryStopper=MemoryStopper
+    MemoryStopper=MemoryStopper,
+    EmpiricalStopper=EmpiricalStopper,
+    NonImprovementStopper=NonImprovementStopper
 )
 
-__all__ = ["Stopper", "ConstantStopper", "StableStopper", "MemoryStopper"]
+__all__ = ["Stopper", "ConstantStopper", "StableStopper", "MemoryStopper", "EmpiricalStopper", "NonImprovementStopper"]

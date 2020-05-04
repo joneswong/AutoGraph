@@ -3,9 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
+import logging
 
 from early_stoppers import Stopper
 from utils import get_performance
+
+logger = logging.getLogger('code_submission')
 
 # current implementation: run WINDOW_SIZE steps at least
 WINDOW_SIZE = 10
@@ -39,6 +42,7 @@ class MemoryStopper(Stopper):
             count = self.performance_memory[self._cur_step][1]
             self.performance_memory[self._cur_step] = ((ave_performance_over_trials*count+ave_performance_over_window)/(count+1), count+1)
             if ave_performance_over_window < self.performance_memory[self._cur_step][0]:
+                logger.info("early stop at {} epoch".format(self._cur_step))
                 return True
 
         return self._cur_step >= self._max_step
