@@ -37,3 +37,8 @@ class StableStopper(Stopper):
             logger.info("early stop at {} epoch".format(self._cur_step))
             return True
         return self._cur_step >= self._max_step
+
+    def reset(self):
+        self._cur_step = 0
+        self.index = 0
+        self.performance_windows = [None for i in range(WINDOW_SIZE)]
