@@ -18,11 +18,13 @@ SAFE_FRAC=0.95
 class Ensembler(object):
 
     def __init__(self,
+                 early_stopper,
                  config_selection='greedy',
                  training_strategy='cv',
                  *args,
                  **kwargs):
 
+        self._ensembler_early_stopper = early_stopper
         self._config_selection = config_selection
         self._training_strategy = training_strategy
 
@@ -66,11 +68,11 @@ class Ensembler(object):
                 train_mask = torch.sum(
                     torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
                 valid_mask = parts[cur_valid_part_idx]
-                scheduler.reset_trial()
+                self._ensembler_early_stopper.reset()
                 while not scheduler.should_stop(SAFE_FRAC):
                     train_info = model.train(data, train_mask)
                     valid_info = model.valid(data, valid_mask)
-                    if scheduler.should_stop_trial(train_info, valid_info):
+                    if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
                         logits = model.pred(data, make_decision=False)
                         part_logits.append(logits.cpu().numpy())
                         break
