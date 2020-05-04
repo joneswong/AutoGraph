@@ -11,8 +11,10 @@ from spaces import Categoric
 from schedulers import Scheduler
 from schedulers import GridSearcher
 from schedulers import BayesianOptimizer
+from schedulers import GeneticOptimizer
 from early_stoppers import ConstantStopper
 from early_stoppers import StableStopper
+from early_stoppers import MemoryStopper
 from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import fix_seed, generate_pyg_data, divide_data
@@ -27,8 +29,8 @@ logger.addHandler(handler)
 logger.propagate = False
 
 ALGO = GCNAlgo
-STOPPER = StableStopper
-SCHEDULER = BayesianOptimizer
+STOPPER = MemoryStopper
+SCHEDULER = GeneticOptimizer
 ENSEMBLER = Ensembler
 FRAC_FOR_SEARCH=0.75
 
@@ -52,7 +54,7 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        early_stopper = STOPPER(max_step=800)
+        early_stopper = STOPPER(max_step=400)
         # ensemble the promising models searched
         ensembler = ENSEMBLER(
             config_selection='greedy', training_strategy='cv')

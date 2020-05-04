@@ -81,7 +81,8 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
 def get_performance(valid_info):
     # the larger, the better
     # naive implementation
-    return -valid_info['logloss']+0.1*valid_info['accuracy']
+    # return -valid_info['logloss']+0.1*valid_info['accuracy']
+    return valid_info['accuracy']
 
 
 def divide_data(data, split_rates, device):
