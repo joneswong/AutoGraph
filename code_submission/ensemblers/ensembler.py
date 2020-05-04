@@ -11,7 +11,7 @@ from utils import get_performance, divide_data
 
 logger = logging.getLogger('code_submission')
 
-CV_NUM_FOLD=4
+CV_NUM_FOLD=5
 SAFE_FRAC=0.95
 
 
@@ -50,17 +50,19 @@ class Ensembler(object):
                  data,
                  scheduler,
                  algo,
-                 opt_records):
+                 opt_records,
+                 learn_from_scratch=False):
 
         logger.info("to train model(s) with {} config(s)".format(len(opt_records)))
         if self._training_strategy == 'cv':
             opt_record = opt_records[0]
-            parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD])
+            parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device)
             part_logits = list()
             cur_valid_part_idx = 0
             while (not scheduler.should_stop(SAFE_FRAC)) and (cur_valid_part_idx < CV_NUM_FOLD):
                 model = algo(n_class, num_features, device, opt_record[0])
-                model.load_model(opt_record[1])
+                if not learn_from_scratch:
+                    model.load_model(opt_record[1])
                 train_mask = torch.sum(
                     torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
                 valid_mask = parts[cur_valid_part_idx]

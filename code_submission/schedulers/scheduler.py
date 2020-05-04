@@ -78,8 +78,9 @@ class Scheduler(object):
                     results[k] = v.default_value
         return results
 
-    def pred(self, n_class, num_features, device, data, algo):
+    def pred(self, n_class, num_features, device, data, algo, learn_from_scratch=False):
         considered_configs = self._ensembler.select_configs(self._results)
         predictions = self._ensembler.ensemble(
-            n_class, num_features, device, data, self, algo, considered_configs)
+            n_class, num_features, device, data, self, algo,
+            considered_configs, learn_from_scratch)
         return predictions

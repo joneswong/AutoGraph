@@ -30,7 +30,7 @@ ALGO = GCNAlgo
 STOPPER = StableStopper
 SCHEDULER = BayesianOptimizer
 ENSEMBLER = Ensembler
-FRAC_FOR_SEARCH=0.8
+FRAC_FOR_SEARCH=0.75
 
 # TO DO: empirically check the correctness of seeding
 fix_seed(1234)
@@ -64,8 +64,8 @@ class Model(object):
         """the only way ingestion interacts with user script"""
 
         self._scheduler.setup_timer(time_budget)
-        data = generate_pyg_data(data).to(self.device)
-        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2])
+        data = generate_pyg_data(data, False, False).to(self.device)
+        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
         logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
 
         algo = None
@@ -92,7 +92,7 @@ class Model(object):
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
         
         pred = self._scheduler.pred(
-            n_class, data.x.size()[1], self.device, data, ALGO)
+            n_class, data.x.size()[1], self.device, data, ALGO, True)
         logger.info("remaining {}s after ensemble".format(self._scheduler.get_remaining_time()))
 
         return pred

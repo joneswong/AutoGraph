@@ -48,6 +48,13 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
     ###   feature engineering  ###
     if use_dim_reduction:
         x = dim_reduction(x, sparse_threshold, pca_threshold)
+    else:
+        if x.shape[1] == 1:
+            x = x.to_numpy()
+            x = x.reshape(x.shape[0])
+            x = np.array(pd.get_dummies(x))
+        else:
+            x = x.drop('node_index', axis=1).to_numpy()
 
     if x.shape[1] == 1 and use_feature_generation:
         added_feature = feature_generation(x, edge_index)
@@ -77,7 +84,7 @@ def get_performance(valid_info):
     return -valid_info['logloss']+0.1*valid_info['accuracy']
 
 
-def divide_data(data, split_rates):
+def divide_data(data, split_rates, device):
     # divide training data into several partitions
     indices = np.array(data.train_indices)
     np.random.shuffle(indices)
@@ -99,5 +106,5 @@ def divide_data(data, split_rates):
     for i in range(len(all_indices)):
         part_masks = torch.zeros(data.num_nodes, dtype=torch.bool)
         part_masks[all_indices[i]] = 1
-        masks.append(part_masks)
+        masks.append(part_masks.to(device))
     return tuple(masks)
