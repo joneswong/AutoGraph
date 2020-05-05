@@ -19,7 +19,9 @@ class MemoryStopper(Stopper):
     def __init__(self, min_step=40, max_step=400):
         self._min_step = max(min_step, WINDOW_SIZE)
         self._max_step = max_step
-        self.performance_memory = {}
+
+        # self.performance_memory -> index: step, value: (average performance, count)
+        self.performance_memory = [(0.0, 0) for i in range(max_step+1)]
         self.performance_windows = [None for i in range(WINDOW_SIZE)]
         self.index = 0
 
@@ -34,10 +36,6 @@ class MemoryStopper(Stopper):
         if self._cur_step >= self._min_step:
             # average over window to reduce variance
             ave_performance_over_window = np.mean(self.performance_windows)
-
-            if self._cur_step not in self.performance_memory.keys():
-                # self.performance_memory -> key: step, value: (average performance, count)
-                self.performance_memory[self._cur_step] = (0.0, 0)
             ave_performance_over_trials = self.performance_memory[self._cur_step][0]
             count = self.performance_memory[self._cur_step][1]
             self.performance_memory[self._cur_step] = ((ave_performance_over_trials*count+ave_performance_over_window)/(count+1), count+1)
