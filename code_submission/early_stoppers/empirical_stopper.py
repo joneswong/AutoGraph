@@ -7,35 +7,32 @@ import logging
 import numpy as np
 
 from early_stoppers import Stopper
-from utils import get_performance
 
 logger = logging.getLogger('code_submission')
 
-# be very careful when setting STOP_STD
-# (highly related to the adopted performance evaluation function)
-# too large -> stop too fast, too small -> do not stop early
-STOP_STD = 0.0001
 # current implementation: run WINDOW_SIZE steps at least
-WINDOW_SIZE = 10
+WINDOW_SIZE = 20
 
 
-class StableStopper(Stopper):
+class EmpiricalStopper(Stopper):
 
-    def __init__(self, max_step=800):
-
+    def __init__(self, min_step=40, max_step=800):
+        self._min_step = max(min_step, WINDOW_SIZE)
         self._max_step = max_step
         self.performance_windows = [None for i in range(WINDOW_SIZE)]
         self.index = 0
-        super(StableStopper, self).__init__()
+        super(EmpiricalStopper, self).__init__()
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
-        self.performance_windows[self.index] = get_performance(valid_info)
-        self.index = (self.index + 1) % WINDOW_SIZE
-        if self.performance_windows[self.index] is not None and \
-                np.std(self.performance_windows) < STOP_STD:
+        cur_performance = -valid_info['logloss']
+        # cur_performance = valid_info['accuracy']
+        if self._cur_step > self._min_step and \
+                cur_performance < np.mean(self.performance_windows):
             logger.info("early stop at {} epoch".format(self._cur_step))
             return True
+        self.performance_windows[self.index] = cur_performance
+        self.index = (self.index + 1) % WINDOW_SIZE
         return self._cur_step >= self._max_step
 
     def reset(self):
