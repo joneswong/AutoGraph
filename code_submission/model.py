@@ -8,11 +8,8 @@ import time
 import torch
 
 from spaces import Categoric
-from schedulers import Scheduler
-from schedulers import GridSearcher
-from schedulers import BayesianOptimizer
-from early_stoppers import ConstantStopper
-from early_stoppers import StableStopper
+from schedulers import *
+from early_stoppers import *
 from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import fix_seed, generate_pyg_data, divide_data
@@ -27,8 +24,9 @@ logger.addHandler(handler)
 logger.propagate = False
 
 ALGO = GCNAlgo
-STOPPER = StableStopper
-SCHEDULER = BayesianOptimizer
+HPO_STOPPER = MemoryStopper
+ENSEMBLER_STOPPER = NonImprovementStopper
+SCHEDULER = GeneticOptimizer
 ENSEMBLER = Ensembler
 FRAC_FOR_SEARCH=0.75
 
@@ -52,13 +50,14 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        early_stopper = STOPPER(max_step=800)
+        hpo_early_stopper = HPO_STOPPER(max_step=400)
+        ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
         ensembler = ENSEMBLER(
-            config_selection='greedy', training_strategy='cv')
+            early_stopper=ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, early_stopper, ensembler)
+        self._scheduler = SCHEDULER(self._hyperparam_space, hpo_early_stopper, ensembler)
 
     def train_predict(self, data, time_budget, n_class, schema):
         """the only way ingestion interacts with user script"""
