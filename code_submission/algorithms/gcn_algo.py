@@ -51,10 +51,60 @@ class GCN(torch.nn.Module):
             x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
         x = self.lin2(x)
-        return F.log_softmax(x, dim=-1)
+        # return the logits, put the log_softmax operation into the GNNAlgo
+        return x
 
     def __repr__(self):
         return self.__class__.__name__
+
+
+class FocalLoss(torch.nn.Module):
+    def __init__(self, gamma=2, alpha=0.5, device=torch.device('cpu'), reduction="mean"):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.device = device
+        self.reduction = reduction
+        self._EPSILON = 1e-7
+        self.alpha = 0.5  # default alpha for binary classification
+        if isinstance(alpha, list):
+            self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device)
+        else:
+            raise ValueError("Your alpha should be a weight list with shape 1 * n, n is the label number.")
+
+    def forward(self, input, target):
+        """
+        :param input: shape N * C
+        :param target: shape N, categorical_target format
+        :return: loss
+        """
+        if not len(target.shape) == 1:
+            raise ValueError("Your target shape should be categorical format. Got: {}.".format(target.shape))
+        if not len(input.shape) == 2:
+            raise ValueError("Your input shape should be N * C. Got: {}.".format(input.shape))
+
+        N, C = input.shape
+        # transform categorical_target into onehot_target
+        categorical_y = target.view(-1, 1)
+        one_hot_target = torch.zeros([N, C], dtype=torch.float32, device=categorical_y.device)
+        one_hot_target.scatter_(1, categorical_y, 1)
+
+        # to avoid zero division
+        input = input + self._EPSILON
+        pt = F.softmax(input)
+
+        ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
+        loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
+        loss = loss_weight * ce_loss
+
+        if self.reduction == 'none':
+            loss = loss
+        elif self.reduction == 'mean':
+            loss = torch.mean(loss)
+        elif self.reduction == 'sum':
+            loss = torch.sum(loss)
+        else:
+            raise NotImplementedError("Invalid reduction mode: {}".format(self.reduction))
+        return loss
 
 
 class GNNAlgo(object):
@@ -66,7 +116,8 @@ class GNNAlgo(object):
                  num_class,
                  features_num,
                  device,
-                 config):
+                 config,
+                 non_hpo_config):
 
         self._num_class = num_class
         self._features_num = features_num
@@ -79,17 +130,24 @@ class GNNAlgo(object):
             self.model.parameters(),
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
+        self.loss_type = config.get("loss_type", "focal_loss")
+        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
+
         
-    def train(self, data):
+    def train(self, data, data_mask):
         self.model.train()
         self._optimizer.zero_grad()
-        loss = F.nll_loss(
-            self.model(data)[data_mask], data.y[data_mask])
+        if self.loss_type == "focal_loss":
+            loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask])
+        elif self.loss_type == "ce_loss":
+            loss = F.cross_entropy(self.model(data)[data_mask], data.y[data_mask])
+        else:
+            raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
         loss.backward()
         self._optimizer.step()
-        # We may need values other than logloss for making better decisions on
+        # We may need values other than loss for making better decisions on
         # when to stop the training course
-        return {"logloss": loss.item()}
+        return {"loss": loss.item()}
 
     def valid(self, data, data_mask):
         self.model.eval()
@@ -97,11 +155,16 @@ class GNNAlgo(object):
             validation_output = self.model(data)[data_mask]
             validation_pre = validation_output.max(1)[1]
             validation_truth = data.y[data_mask]
-            logloss = F.nll_loss(validation_output, validation_truth)
+            if self.loss_type == "focal_loss":
+                loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask])
+            elif self.loss_type == "ce_loss":
+                loss = F.cross_entropy(validation_output, validation_truth)
+            else:
+                raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
 
         cpu = torch.device('cpu')
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
-        return {"logloss": logloss.item(), "accuracy": accuracy}
+        return {"loss": loss.item(), "accuracy": accuracy}
     
     def pred(self, data, make_decision=True):
         self.model.eval()

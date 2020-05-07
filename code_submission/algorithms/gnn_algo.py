@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.nn import Linear, functional as F
 from torch_geometric.nn import JumpingKnowledge, SGConv, SplineConv, APPNP
-from .gcn_algo import GNNAlgo
+from .gcn_algo import GNNAlgo, FocalLoss
 from .gnn_tricks import GraphSizeNorm
 
 
@@ -172,15 +172,19 @@ class SplineGCNAlgo(GNNAlgo):
         dim=Categoric([1], None, 1),
         kernel_size=Categoric([2, 3, 4], None, 2),
         edge_droprate=Numeric((), np.float32, 0.0, 0.0, 0.0),
-        feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "graph_size_norm"),
+        feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
         # todo (daoyuan): add pair_norm and batch_norm
+        loss_type=Categoric(["focal_loss", "ce_loss"], None, "focal_loss"),
+        #gamma=Categoric([0.2, 0.5, 1.0, 2.0, 4.0], None, 2.0),
     )
 
     def __init__(self,
                  num_class,
                  features_num,
                  device,
-                 config):
+                 config,
+                 non_hpo_config,
+                 ):
         self._device = device
         self._num_class = num_class
         self.model = SplineGCN(
@@ -192,6 +196,8 @@ class SplineGCNAlgo(GNNAlgo):
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
+        self.loss_type = config.get("loss_type", "focal_loss")
+        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
 
 class SplineGCN_APPNPAlgo(GNNAlgo):
@@ -205,7 +211,7 @@ class SplineGCN_APPNPAlgo(GNNAlgo):
         kernel_size=Categoric([2, 3, 4], None, 2),
         edge_droprate=Numeric((), np.float32, 0.0, 0.0, 0.0),
         # todo (daoyuan): add pair_norm and batch_norm
-        feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
+        feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "graph_size_norm"),
         iter_k=Categoric([10, 20, 40], None, 10),
         tele_prob=Numeric((), np.float32, 0.2, 0.7, 0.5),
     )
@@ -214,7 +220,8 @@ class SplineGCN_APPNPAlgo(GNNAlgo):
                  num_class,
                  features_num,
                  device,
-                 config):
+                 config,
+                 focal_loss=False):
         self._device = device
         self._num_class = num_class
         self.model = SplineGCN(
@@ -226,5 +233,7 @@ class SplineGCN_APPNPAlgo(GNNAlgo):
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
+        self.focal_loss = focal_loss
+
 
 

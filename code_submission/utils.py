@@ -64,6 +64,19 @@ def generate_pyg_data(data):
     return data
 
 
+def get_label_weights(train_label, n_class):
+    """
+        return label balanced weights according to the label distribution
+    """
+    unique, counts = np.unique(train_label, return_counts=True)
+    if not len(counts) == n_class:
+        raise ValueError("Your train_label has different label size to the meta_n_class")
+    # naive implementation, return the same weights for all label class
+    # todo test the inversely proportional weights according to counts
+    return [1.0 / n_class] * n_class
+
+
+
 def generate_pyg_data_feature_transform(data, use_dim_reduction=True, use_feature_generation=True, sparse_threshold=0.9,
                       pca_threshold=0.75):
     x = data['fea_table']
@@ -115,7 +128,7 @@ def generate_pyg_data_feature_transform(data, use_dim_reduction=True, use_featur
 def get_performance(valid_info):
     # the larger, the better
     # naive implementation
-    return -valid_info['logloss']+0.1*valid_info['accuracy']
+    return -valid_info['loss']+0.1*valid_info['accuracy']
 
 
 def hyperparam_space_tostr(hyperparam_space):
