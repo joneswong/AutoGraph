@@ -31,7 +31,7 @@ def main():
                 result = dur_reg.search(line)
                 if result:
                     durs.append(float(result.group(1)))
-        assert len(accs)==len(durs) and len(accs)==args.num_exp, "Invalid experiment results {} {} of {}-th exp!".format(len(accs), len(durs), i+1)
+        assert len(accs)==len(durs) and len(accs)==5, "Invalid experiment results {} {} of {}-th exp!".format(len(accs), len(durs), i+1)
         exp_accs.append(accs)
         exp_durs.append(durs)
     mean_acc = np.mean(exp_accs, 0)
