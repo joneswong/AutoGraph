@@ -111,6 +111,19 @@ class GNNAlgo(object):
     """Encapsulate the torch.Module and the train&valid&test routines"""
 
     hyperparam_space = dict()
+    # hyperparam_space = dict(
+    #     num_layers=Categoric(list(range(2,5)), None, 2),
+    #     hidden=Categoric([16, 32, 64, 128], None, 16),
+    #     dropout_rate=Numeric((), np.float32, 0.2, 0.6, 0.5),
+    #     lr=Numeric((), np.float32, 1e-4, 1e-2, 5e-3),
+    #     weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4))
+
+    hyperparam_space = dict(
+        num_layers=Categoric(list(range(2, 5)), None, 2),
+        hidden=Categoric([16, 32, 64, 128], None, 16),
+        dropout_rate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
+        weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4))
 
     def __init__(self,
                  num_class,

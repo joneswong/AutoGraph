@@ -7,18 +7,20 @@ import time
 
 import torch
 
-from schedulers import Scheduler, GridSearcher, BayesianOptimizer
-from early_stoppers import ConstantStopper
-from early_stoppers import StableStopper
+
 # from algorithms import GraphSAINTRandomWalkSampler
 from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
+from spaces import Categoric
+from schedulers import *
+from early_stoppers import *
+from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import fix_seed, generate_pyg_data, generate_pyg_data_feature_transform, \
     divide_data, hyperparam_space_tostr, get_label_weights
 from torch_geometric.data import DataLoader
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
 handler = logging.StreamHandler()
 handler.setFormatter(
@@ -29,10 +31,11 @@ logger.propagate = False
 
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
 ALGO = ALGOs[1]
-STOPPERs = [StableStopper, ConstantStopper]
-STOPPER = STOPPERs[0]
-SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler]
-SCHEDULER = SCHEDULERs[1]
+STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper]
+HPO_STOPPER = STOPPERs[0]
+ENSEMBLER_STOPPER = STOPPERs[1]
+SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
+SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
 FEATURE_ENGINEERING = False
 FRAC_FOR_SEARCH = 0.65
@@ -61,13 +64,14 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        early_stopper = STOPPER(max_step=800)
+        hpo_early_stopper = HPO_STOPPER(max_step=400)
+        ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
         ensembler = ENSEMBLER(
-            config_selection='greedy', training_strategy='cv')
+            early_stopper=ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, early_stopper, ensembler)
+        self._scheduler = SCHEDULER(self._hyperparam_space, hpo_early_stopper, ensembler)
 
         logger.info('Device: %s', self.device)
         logger.info('FRAC_FOR_SEARCH: %s', FRAC_FOR_SEARCH)
@@ -128,4 +132,3 @@ class Model(object):
         logger.info("remaining {}s after ensemble".format(self._scheduler.get_remaining_time()))
 
         return pred
-
