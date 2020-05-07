@@ -2,12 +2,20 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+import time
 import random
+
 import numpy as np
 import pandas as pd
 import torch
 from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
+<<<<<<< HEAD
+=======
+
+logger=logger = logging.getLogger('code_submission')
+>>>>>>> master
 
 
 def fix_seed(seed):
@@ -43,6 +51,16 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
     ###   feature engineering  ###
     if use_dim_reduction:
         x = dim_reduction(x, sparse_threshold, pca_threshold)
+<<<<<<< HEAD
+=======
+    else:
+        if x.shape[1] == 1:
+            x = x.to_numpy()
+            x = x.reshape(x.shape[0])
+            x = np.array(pd.get_dummies(x))
+        else:
+            x = x.drop('node_index', axis=1).to_numpy()
+>>>>>>> master
 
     if x.shape[1] == 1 and use_feature_generation:
         added_feature = feature_generation(x, edge_index)
@@ -69,11 +87,12 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
 def get_performance(valid_info):
     # the larger, the better
     # naive implementation
-    return -valid_info['logloss']+0.1*valid_info['accuracy']
+    # return -valid_info['logloss']+0.1*valid_info['accuracy']
+    return valid_info['accuracy']
 
-def divide_data(data, split_rates):
-    assert len(split_rates) == 3
 
+def divide_data(data, split_rates, device):
+    # divide training data into several partitions
     indices = np.array(data.train_indices)
     np.random.shuffle(indices)
 
@@ -83,14 +102,16 @@ def divide_data(data, split_rates):
         accumulated_rate += r
         split_thred.append(int(len(indices)*accumulated_rate/np.sum(split_rates)))
 
-    train_indices = indices[:split_thred[0]]
-    early_valid_indices = indices[split_thred[0]:split_thred[1]]
-    final_valid_indices = indices[split_thred[1]:]
+    all_indices = list()
+    prev = 0
+    for i, end in enumerate(split_thred):
+        part_indices = indices[prev:end] if i < len(split_thred)-1 else indices[prev:]
+        prev = end
+        all_indices.append(part_indices)
 
-    train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    train_mask[train_indices] = 1
-    early_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    early_valid_mask[early_valid_indices] = 1
-    final_valid_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
-    final_valid_mask[final_valid_indices] = 1
-    return train_mask, early_valid_mask, final_valid_mask
+    masks = list()
+    for i in range(len(all_indices)):
+        part_masks = torch.zeros(data.num_nodes, dtype=torch.bool)
+        part_masks[all_indices[i]] = 1
+        masks.append(part_masks.to(device))
+    return tuple(masks)

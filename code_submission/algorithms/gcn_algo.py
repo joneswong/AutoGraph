@@ -54,12 +54,19 @@ class GCN(torch.nn.Module):
 class GCNAlgo(object):
     """Encapsulate the torch.Module and the train&valid&test routines"""
 
+    # hyperparam_space = dict(
+    #     num_layers=Categoric(list(range(2,5)), None, 2),
+    #     hidden=Categoric([16, 32, 64, 128], None, 16),
+    #     dropout_rate=Numeric((), np.float32, 0.2, 0.6, 0.5),
+    #     lr=Numeric((), np.float32, 1e-4, 1e-2, 5e-3),
+    #     weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4))
+
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(2,5)), None, 2),
+        num_layers=Categoric(list(range(2, 5)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 16),
-        dropout_rate=Numeric((), np.float32, 0.2, 0.6, 0.5),
-        lr=Numeric((), np.float32, 1e-4, 1e-2, 5e-3),
-        weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4))
+        dropout_rate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
+        weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4))
 
     def __init__(self,
                  num_class,
@@ -101,10 +108,13 @@ class GCNAlgo(object):
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
         return {"logloss": logloss.item(), "accuracy": accuracy}
     
-    def pred(self, data):
+    def pred(self, data, make_decision=True):
         self.model.eval()
         with torch.no_grad():
-            pred = self.model(data)[data.test_mask].max(1)[1]
+            if make_decision:
+                pred = self.model(data)[data.test_mask].max(1)[1]
+            else:
+                pred = self.model(data)[data.test_mask]
         return pred
 
     def save_model(self, path):
