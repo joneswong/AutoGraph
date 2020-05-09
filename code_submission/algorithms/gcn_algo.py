@@ -2,11 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
-from torch_geometric.nn import GCNConv, JumpingKnowledge
+from torch_geometric.nn import GCNConv
 from sklearn.metrics import accuracy_score
 
 from spaces import Categoric, Numeric
@@ -110,7 +109,6 @@ class FocalLoss(torch.nn.Module):
 class GNNAlgo(object):
     """Encapsulate the torch.Module and the train&valid&test routines"""
 
-    hyperparam_space = dict()
     # hyperparam_space = dict(
     #     num_layers=Categoric(list(range(2,5)), None, 2),
     #     hidden=Categoric([16, 32, 64, 128], None, 16),
@@ -201,27 +199,36 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(2,5)), None, 2),
+        num_layers=Categoric(list(range(2, 5)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 16),
-        hidden_droprate=Numeric((), np.float32, 0.2, 0.6, 0.5),
-        lr=Numeric((), np.float32, 1e-5, 1e-2, 5e-3),
-        weight_decay=Numeric((), np.float32, .0, 1e-3, 5e-4),
-        edge_droprate=Numeric((), np.float32, 0.2, 0.6, 0.5),
+        dropout_rate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
+        weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
+        edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),
+        feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
+        # todo (daoyuan): add pair_norm and batch_norm
+        # loss_type=Categoric(["focal_loss", "ce_loss"], None, "focal_loss"),
+        loss_type=Categoric(["ce_loss"], None, "ce_loss"),
     )
+
 
     def __init__(self,
                  num_class,
                  features_num,
                  device,
-                 config):
+                 config,
+                 non_hpo_config,
+                 ):
         self._device = device
         self._num_class = num_class
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", config.get("edge_droprate", 0.0)).to(device))
+            config.get("hidden", 16), config.get("hidden_droprate", config.get("edge_droprate", 0.0))).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
+        self.loss_type = config.get("loss_type", "focal_loss")
+        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 

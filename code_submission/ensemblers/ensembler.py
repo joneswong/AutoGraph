@@ -13,6 +13,8 @@ logger = logging.getLogger('code_submission')
 
 CV_NUM_FOLD=5
 SAFE_FRAC=0.95
+SMALL_EPOCH=20
+FINE_TUNE_WHEN_CV=False
 
 
 class Ensembler(object):
@@ -58,6 +60,8 @@ class Ensembler(object):
                  ):
 
         logger.info("to train model(s) with {} config(s)".format(len(opt_records)))
+        for opt_record in opt_records:
+            logger.info("searched opt_config is {}.".format(opt_records))
         if self._training_strategy == 'cv':
             opt_record = opt_records[0]
             parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device)
@@ -78,6 +82,12 @@ class Ensembler(object):
                         logits = model.pred(data, make_decision=False)
                         part_logits.append(logits.cpu().numpy())
                         break
+                if FINE_TUNE_WHEN_CV:
+                    # naive version: enhance the model by train with the valid data part
+                    while not scheduler.should_stop(SAFE_FRAC):
+                        # todo some other heuristic method to set the small_epoch, e.g., the average epochs of the stopper
+                        for i in range(SMALL_EPOCH):
+                            model.train(data, valid_mask)
                 cur_valid_part_idx += 1
             if len(part_logits) == 0:
                 logger.warn("have not completed even one training course")
