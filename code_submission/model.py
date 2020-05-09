@@ -63,7 +63,7 @@ class Model(object):
         """the only way ingestion interacts with user script"""
 
         self._scheduler.setup_timer(time_budget)
-        data = generate_pyg_data(data, False, False).to(self.device)
+        data = generate_pyg_data(data, n_class).to(self.device)
         train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
         logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
 

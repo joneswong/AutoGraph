@@ -6,6 +6,7 @@ import random
 import numpy as np
 import pandas as pd
 import torch
+import time
 from torch_geometric.data import Data
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
@@ -19,29 +20,54 @@ def _pca_processing(data, pca_threshold=0.75):
     data = pca.fit_transform(data)
     return data
 
-def dim_reduction(x, sparse_threshold=0.9, pca_threshold=0.75):
+def get_neighbor_label_distribution(edges, y, n_class):
+    EPSILON = 1e-8
+    num_nodes = len(y)
+    distribution= np.zeros([num_nodes, n_class+1], dtype=np.float32)
+    for edge in edges:
+        src_idx = edge[0]
+        dst_idx = edge[1]
+        distribution[src_idx][y[dst_idx]] += 1.0
+        distribution[dst_idx][y[src_idx]] += 1.0
+
+    norm_matrix = np.sum(distribution[:,:-1], axis=1, keepdims=True) + EPSILON
+    distribution = distribution[:,:-1] / norm_matrix
+    
+    return distribution
+
+def get_node_degree(nodes, num_nodes):
+    node_degree = degree(nodes, num_nodes)
+    return np.expand_dims(node_degree, axis=-1)
+    
+
+def dim_reduction(x):
     #remove uninformative col
     index_col = x['node_index']
     drop_col = [col for col in x.columns if x[col].var() == 0] + ['node_index']
-    x = x.drop(drop_col,axis=1)
-
-    # pca
-    if x.shape[1] != 0:
-        sparse_col = [col for col in x.columns if x[col].value_counts()[0] > sparse_threshold*x.shape[0]]
-        dense_col = [col for col in x.columns if col not in sparse_col]
-        sparse_feature = x[sparse_col]
-        dense_feature = x[dense_col]
-        pre_sparse_feature = _pca_processing(sparse_feature, pca_threshold)
-        pre_dense_feature = dense_feature.to_numpy()
-        pre_x = np.concatenate([pre_sparse_feature,pre_dense_feature],axis=1)
+    if len(drop_col) == len(x.columns):
+        x = np.expand_dims(index_col.to_numpy(),axis=-1)
+        non_feature = True
     else:
-        pre_x = np.expand_dims(index_col.to_numpy(),axis=-1)
+        x = x.drop(drop_col,axis=1).to_numpy()
+        non_feature = False
+    
+    return x, non_feature
 
-    return pre_x
+def feature_generation(x, y, n_class, edges, non_feature, use_label_distribution=True, use_node_degree=True):
+    added_features = []
+    
+    #start_time = time.time()
+    if non_feature and use_label_distribution:
+        label_distribution = get_neighbor_label_distribution(edges, y, n_class) 
+        added_features.append(label_distribution)
+        #print(label_distribution.shape)
 
-def feature_generation(x, edge_index):
-    # new_feature: node degree
-    row, col = edge_index
-    node_degree = degree(row, x.shape[0])
+    #print('label_dis', time.time() - start_time)
 
-    return np.expand_dims(node_degree, axis=-1)
+    if non_feature and use_node_degree:
+        node_degree = get_node_degree(edges[0], x.shape[0])
+        added_features.append(node_degree)
+        #print(node_degree.shape)
+
+    #print('degree_time', time.time() - start_time)
+    return added_features

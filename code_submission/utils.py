@@ -11,6 +11,7 @@ import pandas as pd
 import torch
 from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
+from torch_geometric.utils import degree
 
 logger=logger = logging.getLogger('code_submission')
 
@@ -23,8 +24,7 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True, sparse_threshold=0.9, pca_threshold=0.75):
-
+def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_generation=False):
     x = data['fea_table']
 
     df = data['edge_file']
@@ -37,7 +37,7 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
     edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
 
     num_nodes = x.shape[0]
-    y = torch.zeros(num_nodes, dtype=torch.long)
+    y = n_class * torch.ones(num_nodes, dtype=torch.long)
     inds = data['train_label'][['node_index']].to_numpy()
     train_y = data['train_label'][['label']].to_numpy()
     y[inds] = torch.tensor(train_y, dtype=torch.long)
@@ -46,20 +46,22 @@ def generate_pyg_data(data, use_dim_reduction=True, use_feature_generation=True,
     test_indices = data['test_indices']
 
     ###   feature engineering  ###
+    non_feature = False
     if use_dim_reduction:
-        x = dim_reduction(x, sparse_threshold, pca_threshold)
+        x, non_feature = dim_reduction(x)
     else:
         if x.shape[1] == 1:
             x = x.to_numpy()
             x = x.reshape(x.shape[0])
             x = np.array(pd.get_dummies(x))
+            non_feature = True
         else:
             x = x.drop('node_index', axis=1).to_numpy()
 
-    if x.shape[1] == 1 and use_feature_generation:
-        added_feature = feature_generation(x, edge_index)
-        x = np.concatenate([x, added_feature], axis=1)
-    
+    if use_feature_generation:
+        added_features = feature_generation(x, y, n_class, edge_index, non_feature)
+        x = np.concatenate([x]+added_features, axis=1)
+
     x = torch.tensor(x, dtype=torch.float)
 
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
