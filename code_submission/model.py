@@ -104,9 +104,11 @@ class Model(object):
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
         suiable_algo = select_algo_from_data(ALGOs, data)
+        global ALGO
         if suiable_algo != ALGO:
             self.change_algo(suiable_algo)
-        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7,1,2], self.device)
+            ALGO = suiable_algo
+        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
         logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
         # loader = DataLoader(data, batch_size=32, shuffle=True)
 

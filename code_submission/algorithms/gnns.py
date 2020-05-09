@@ -52,7 +52,9 @@ class SplineGCN(torch.nn.Module):
             x = x if self.fea_norm_layer is None else self.fea_norm_layer(x)
             x = F.dropout(x, p=self.droprate, training=self.training)
             x = F.elu(conv(x, edge_index, edge_weight))
-        return F.log_softmax(x, dim=-1)
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
+        return x
 
     def __repr__(self):
         return self.__class__.__name__
@@ -94,7 +96,9 @@ class SplineGCN_APPNP(torch.nn.Module):
             x = F.dropout(x, p=self.droprate, training=self.training)
             x = F.elu(conv(x, edge_index, edge_weight))
         x = self.appnp(x)
-        return F.log_softmax(x, dim=-1)
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
+        return x
 
     def __repr__(self):
         return self.__class__.__name__
@@ -131,7 +135,9 @@ class SGCN(torch.nn.Module):
             x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
         x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = self.lin2(x)
-        return F.log_softmax(x, dim=-1)
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
+        return x
 
     def __repr__(self):
         return self.__class__.__name__

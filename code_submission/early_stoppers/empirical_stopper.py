@@ -25,7 +25,7 @@ class EmpiricalStopper(Stopper):
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
-        cur_performance = -valid_info['logloss']
+        cur_performance = -valid_info['loss']
         # cur_performance = valid_info['accuracy']
         if self._cur_step > self._min_step and \
                 cur_performance < np.mean(self.performance_windows):

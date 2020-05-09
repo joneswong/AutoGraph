@@ -21,12 +21,12 @@ def main():
     exp_trials = list()
     acc_reg = re.compile("INFO score\.py: accuracy: (\d+\.\d*)")
     dur_reg = re.compile("INFO timing\.py: train_predict success, time spent (\d+\.\d*) sec")
-    trial_reg = re.compile("INFO ensembler\.py: to select config(s) from (\d+) candidates")
+    trial_reg = re.compile("INFO ensembler\.py: to select config\(s\) from (\d+) candidates")
     for i in range(args.num_exp):
         accs = list()
         durs = list()
         trials = list()
-        with open("{}exp{}.out".format(args.res_path, i+1), 'r') as ips:
+        with open("{}exp{}.out".format(args.res_path, i + 1), 'r') as ips:
             for line in ips:
                 if "Timed out" in line:
                     break
@@ -39,7 +39,8 @@ def main():
                 result = trial_reg.search(line)
                 if result:
                     trials.append(float(result.group(1)))
-        assert len(accs)==len(durs) and len(accs)==5, "Invalid experiment results {} {} of {}-th exp!".format(len(accs), len(durs), i+1)
+        assert len(accs) == len(durs) and len(accs) == 5, "Invalid experiment results {} {} of {}-th exp!".format(
+            len(accs), len(durs), i + 1)
         exp_accs.append(accs)
         exp_durs.append(durs)
         exp_trials.append(trials)
@@ -54,24 +55,24 @@ def main():
     print("====== accuracy ======")
     print("exp_idx\ta\tb\tc\td\te")
     for i in range(len(exp_accs)):
-        print('\t'.join([str(i+1)]+[str(v) for v in exp_accs[i]]))
-    print('\t'.join(["mean"]+[str(v) for v in mean_acc]))
-    print('\t'.join(["std"]+[str(v) for v in std_acc]))
-
+        print('\t'.join([str(i + 1)] + [str(v) for v in exp_accs[i]]))
+    print('\t'.join(["mean"] + [str(v) for v in mean_acc]))
+    print('\t'.join(["std"] + [str(v) for v in std_acc]))
+    print()
     print("====== duration of train_predict() ======")
     print("exp_idx\ta\tb\tc\td\te")
     for i in range(len(exp_durs)):
-        print('\t'.join([str(i+1)]+[str(v) for v in exp_durs[i]]))
-    print('\t'.join(["mean"]+[str(v) for v in mean_dur]))
-    print('\t'.join(["std"]+[str(v) for v in std_dur]))
-
+        print('\t'.join([str(i + 1)] + [str(v) for v in exp_durs[i]]))
+    print('\t'.join(["mean"] + [str(v) for v in mean_dur]))
+    print('\t'.join(["std"] + [str(v) for v in std_dur]))
+    print()
     print("====== trail times of train_predict() ======")
     print("exp_idx\ta\tb\tc\td\te")
     for i in range(len(exp_durs)):
-        print('\t'.join([str(i+1)]+[str(v) for v in exp_trials[i]]))
-    print('\t'.join(["mean"]+[str(v) for v in mean_trials]))
-    print('\t'.join(["std"]+[str(v) for v in std_trials]))
+        print('\t'.join([str(i + 1)] + [str(v) for v in exp_trials[i]]))
+    print('\t'.join(["mean"] + [str(v) for v in mean_trials]))
+    print('\t'.join(["std"] + [str(v) for v in std_trials]))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

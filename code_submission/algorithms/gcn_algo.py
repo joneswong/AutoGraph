@@ -50,7 +50,8 @@ class GCN(torch.nn.Module):
             x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
         x = self.lin2(x)
-        # return the logits, put the log_softmax operation into the GNNAlgo
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
         return x
 
     def __repr__(self):
@@ -144,7 +145,6 @@ class GNNAlgo(object):
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
-        
     def train(self, data, data_mask):
         self.model.train()
         self._optimizer.zero_grad()
@@ -184,6 +184,8 @@ class GNNAlgo(object):
                 pred = self.model(data)[data.test_mask].max(1)[1]
             else:
                 pred = self.model(data)[data.test_mask]
+        # WARN: from the original master (no focal loss version) to dev_daoyuan version,
+        # the pred is changed from log_softmax(x) into logits x, due to adapt to focal loss
         return pred
 
     def save_model(self, path):
@@ -207,10 +209,8 @@ class GCNAlgo(GNNAlgo):
         edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),
         feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
         # todo (daoyuan): add pair_norm and batch_norm
-        # loss_type=Categoric(["focal_loss", "ce_loss"], None, "focal_loss"),
-        loss_type=Categoric(["ce_loss"], None, "ce_loss"),
+        loss_type=Categoric(["focal_loss", "ce_loss"], None, "focal_loss"),
     )
-
 
     def __init__(self,
                  num_class,

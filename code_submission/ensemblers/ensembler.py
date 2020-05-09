@@ -14,7 +14,7 @@ logger = logging.getLogger('code_submission')
 CV_NUM_FOLD=5
 SAFE_FRAC=0.95
 SMALL_EPOCH=20
-FINE_TUNE_WHEN_CV=False
+FINE_TUNE_WHEN_CV=True
 
 
 class Ensembler(object):
@@ -85,7 +85,8 @@ class Ensembler(object):
                 if FINE_TUNE_WHEN_CV:
                     # naive version: enhance the model by train with the valid data part
                     while not scheduler.should_stop(SAFE_FRAC):
-                        # todo some other heuristic method to set the small_epoch, e.g., the average epochs of the stopper
+                        # todo: add some other heuristic method to set the small_epoch,
+                        #  e.g., the average epochs of the stopper
                         for i in range(SMALL_EPOCH):
                             model.train(data, valid_mask)
                 cur_valid_part_idx += 1
