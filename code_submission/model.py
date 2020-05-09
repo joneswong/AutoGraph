@@ -49,6 +49,7 @@ FIX_FOCAL_LOSS = False
 
 fix_seed(1234)
 
+
 class Model(object):
 
     def __init__(self):
@@ -108,6 +109,7 @@ class Model(object):
         if suiable_algo != ALGO:
             self.change_algo(suiable_algo)
             ALGO = suiable_algo
+        data = generate_pyg_data(data, n_class).to(self.device)
         train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
         logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
         # loader = DataLoader(data, batch_size=32, shuffle=True)
