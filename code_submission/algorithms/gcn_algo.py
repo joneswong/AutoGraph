@@ -12,7 +12,7 @@ from spaces import Categoric, Numeric
 
 from torch_geometric.utils.dropout import dropout_adj
 
-
+# todo (daoyuan) change the GCNConv to DirectedGCNConv
 class GCN(torch.nn.Module):
     def __init__(self,
                  num_class,
@@ -203,7 +203,7 @@ class GCNAlgo(GNNAlgo):
     hyperparam_space = dict(
         num_layers=Categoric(list(range(2, 5)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 16),
-        dropout_rate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
         edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),
@@ -223,7 +223,7 @@ class GCNAlgo(GNNAlgo):
         self._num_class = num_class
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", config.get("edge_droprate", 0.0))).to(device)
+            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),

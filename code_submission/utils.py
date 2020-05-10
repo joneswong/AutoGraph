@@ -13,7 +13,7 @@ from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
 from torch_geometric.utils import degree
 
-logger=logger = logging.getLogger('code_submission')
+logger = logging.getLogger('code_submission')
 
 
 def fix_seed(seed):
@@ -31,7 +31,6 @@ def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_genera
     edge_index = df[['src_idx', 'dst_idx']].to_numpy()
     edge_index = sorted(edge_index, key=lambda d: d[0])
     edge_index = torch.tensor(edge_index, dtype=torch.long).transpose(0, 1)
-
 
     edge_weight = df['edge_weight'].to_numpy()
     edge_weight = torch.tensor(edge_weight, dtype=torch.float32)

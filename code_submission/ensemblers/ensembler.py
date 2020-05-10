@@ -13,7 +13,7 @@ logger = logging.getLogger('code_submission')
 
 CV_NUM_FOLD=5
 SAFE_FRAC=0.95
-SMALL_EPOCH=20
+FINE_TUNE_EPOCH=50
 FINE_TUNE_WHEN_CV=True
 
 
@@ -58,7 +58,7 @@ class Ensembler(object):
                  learn_from_scratch=False,
                  non_hpo_config=dict()
                  ):
-
+        logger.info('Final algo is: %s', algo)
         logger.info("to train model(s) with {} config(s)".format(len(opt_records)))
         for opt_record in opt_records:
             logger.info("searched opt_config is {}.".format(opt_records))
@@ -83,12 +83,15 @@ class Ensembler(object):
                         part_logits.append(logits.cpu().numpy())
                         break
                 if FINE_TUNE_WHEN_CV:
-                    # naive version: enhance the model by train with the valid data part
-                    while not scheduler.should_stop(SAFE_FRAC):
-                        # todo: add some other heuristic method to set the small_epoch,
-                        #  e.g., the average epochs of the stopper
-                        for i in range(SMALL_EPOCH):
-                            model.train(data, valid_mask)
+                    # naive version: enhance the model by train with the valid/whole data part
+                    i = 0
+                    # todo: add some other heuristic method to set the small_epoch,
+                    #  e.g., the average epochs of the stopper
+                    while not scheduler.should_stop(SAFE_FRAC) and i < FINE_TUNE_EPOCH:
+                        # model.train(data, valid_mask)  # fine-tune on the un-seen valid set
+                        model.train(data, data.train_mask)  # fine-tune on the whole data
+                        i += 1
+                    logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
                 cur_valid_part_idx += 1
             if len(part_logits) == 0:
                 logger.warn("have not completed even one training course")

@@ -5,7 +5,7 @@ from __future__ import print_function
 from . import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
 
 
-LARGE_EDGE_NUMBER = 500000
+LARGE_EDGE_NUMBER = 100000
 
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
 

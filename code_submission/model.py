@@ -32,13 +32,15 @@ logger.propagate = False
 
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
 ALGO = ALGOs[1]
-STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper]
-HPO_STOPPER = STOPPERs[0]
-ENSEMBLER_STOPPER = STOPPERs[1]
+STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
+HPO_STOPPER = STOPPERs[3]
+ENSEMBLER_STOPPER = STOPPERs[3]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
-FEATURE_ENGINEERING = False
+FEATURE_ENGINEERING = True
+# todo (daoyuan) dynamic Frac_for_search, on dataset d, GCN has not completed even one entire training,
+#  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
 
@@ -66,14 +68,14 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        hpo_early_stopper = HPO_STOPPER(max_step=400)
+        self.hpo_early_stopper = HPO_STOPPER(max_step=400)
         ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
-        ensembler = ENSEMBLER(
+        self.ensembler = ENSEMBLER(
             early_stopper=ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, hpo_early_stopper, ensembler)
+        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
 
         logger.info('Device: %s', self.device)
         logger.info('FRAC_FOR_SEARCH: %s', FRAC_FOR_SEARCH)
@@ -81,15 +83,16 @@ class Model(object):
         logger.info('Fix focal loss: %s', FIX_FOCAL_LOSS)
         logger.info('Default Algo is: %s', ALGO)
         logger.info('Algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
-        logger.info('HPO_Early_stopper: %s', type(hpo_early_stopper).__name__)
+        logger.info('HPO_Early_stopper: %s', type(self.hpo_early_stopper).__name__)
         logger.info('Ensembler_Early_stopper: %s', type(ensembler_early_stopper).__name__)
-        logger.info('Ensembler: %s', type(ensembler).__name__)
+        logger.info('Ensembler: %s', type(self.ensembler).__name__)
 
-    def change_algo(self, ALGO):
+    def change_algo(self, ALGO, remain_time_budget):
         self._hyperparam_space = ALGO.hyperparam_space
-        logger.info('Change to Algo is: %s', ALGO)
+        logger.info('Change to algo: %s', ALGO)
         logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
-        self._scheduler._hyperparam_space = ALGO.hyperparam_space
+        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+        self._scheduler.setup_timer(remain_time_budget)
 
     def train_predict(self, data, time_budget, n_class, schema):
         """the only way ingestion interacts with user script"""
@@ -101,17 +104,19 @@ class Model(object):
             label_weights = get_label_weights(data['train_label'][['label']].to_numpy(), n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data).to(self.device)
+            data = generate_pyg_data(data, n_class).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
+        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
+        logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
+
+        logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
         suiable_algo = select_algo_from_data(ALGOs, data)
         global ALGO
         if suiable_algo != ALGO:
-            self.change_algo(suiable_algo)
+            remain_time_budget = self._scheduler.get_remaining_time()
+            self.change_algo(suiable_algo, remain_time_budget)
             ALGO = suiable_algo
-        data = generate_pyg_data(data, n_class).to(self.device)
-        train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
-        logger.info("remaining {}s after data prepreration".format(self._scheduler.get_remaining_time()))
         # loader = DataLoader(data, batch_size=32, shuffle=True)
 
         algo = None
