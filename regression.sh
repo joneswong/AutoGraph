@@ -48,7 +48,7 @@ do
   docker run --gpus device=${GPUIDX} --cpus=4 --memory=30g -it --rm -v "$(pwd):/app/autograph" -w /app/autograph nehzux/kddcup2020:v2 python run_local_test.py --dataset_dir=./data/public/e --code_dir=./code_submission 2>>${RESPATH}/exp${i}.err | tee -a ${RESPATH}/exp${i}.out
 done
 
-docker run --cpus=4 --memory=30g -it --rm -v "$(pwd):/app/autograph" -w /app/autograph nehzux/kddcup2020:v2 python code_submission/show_perf.py --num_exp=${NUMEXP} --res_path=${RESPATH}/exp_summary.txt | tee ${RESPATH}/exp_summary.txt
+docker run --cpus=4 --memory=30g -it --rm -v "$(pwd):/app/autograph" -w /app/autograph nehzux/kddcup2020:v2 python code_submission/show_perf.py --num_exp=${NUMEXP} --res_path=${RESPATH}/ | tee ${RESPATH}/exp_summary.txt
 
 echo "finished the regression"
 
