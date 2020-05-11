@@ -11,3 +11,8 @@ class Categoric(Space):
         self.categories = categories
         self.subspaces = subspaces
         super(Categoric, self).__init__(default_value)
+
+    def __repr__(self):
+        space_desc = "categories is %s, subspaces is %s, default_value is %s." % \
+                     (str(self.categories), str(self.subspaces), str(self.default_value))
+        return space_desc

@@ -195,6 +195,7 @@ def main():
     LOGGER.info('===== Load data.')
     dataset = Dataset(args.dataset_dir)
     time_budget = dataset.get_metadata().get("time_budget")
+    # time_budget = time_budget * 2  # used for off-line search
     n_class = dataset.get_metadata().get("n_class")
     schema = dataset.get_metadata().get("schema")
 
