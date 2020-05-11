@@ -14,7 +14,7 @@ class Numeric(Space):
         self.high = high
         super(Numeric, self).__init__(default_value)
 
-    def desc(self):
+    def __repr__(self):
         space_desc = "shape is %s, dtype is %s, low and high is [%s, %s], default_value is %s." % \
                      (str(self.shape), str(self.dtype), str(self.low), str(self.high), str(self.default_value))
         return space_desc

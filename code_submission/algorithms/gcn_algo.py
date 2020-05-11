@@ -11,6 +11,7 @@ from sklearn.metrics import accuracy_score
 from spaces import Categoric, Numeric
 
 from torch_geometric.utils.dropout import dropout_adj
+import numpy as np
 
 # todo (daoyuan) change the GCNConv to DirectedGCNConv
 class GCN(torch.nn.Module):
@@ -66,7 +67,7 @@ class FocalLoss(torch.nn.Module):
         self.reduction = reduction
         self._EPSILON = 1e-7
         self.alpha = 0.5  # default alpha for binary classification
-        if isinstance(alpha, list):
+        if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
             self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device)
         else:
             raise ValueError("Your alpha should be a weight list with shape 1 * n, n is the label number.")

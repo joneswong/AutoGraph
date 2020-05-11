@@ -86,9 +86,9 @@ def get_label_weights(train_label, n_class):
     unique, counts = np.unique(train_label, return_counts=True)
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
-    inversed_counts = [1.0 / count for count in counts]
-    normalize_factor = sum(inversed_counts)
-    inversed_counts = [count / normalize_factor for count in inversed_counts]
+    inversed_counts = 1.0 / counts
+    normalize_factor = inversed_counts.sum()
+    inversed_counts = inversed_counts / normalize_factor
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
 
@@ -137,8 +137,6 @@ def generate_pyg_data_without_transform(data):
     return data
 
 
-
-
 def get_performance(valid_info):
     # the larger, the better
     # naive implementation
@@ -149,9 +147,8 @@ def get_performance(valid_info):
 def hyperparam_space_tostr(hyperparam_space):
     hyperparam_space_str = '\n'
     for k, v in hyperparam_space.items():
-        hyperparam_space_str = hyperparam_space_str + "%-15s: %s\n" % (k, v.desc())
+        hyperparam_space_str = hyperparam_space_str + "%-15s: %s\n" % (k, v)
     return hyperparam_space_str
-
 
 
 def divide_data(data, split_rates, device):
@@ -171,6 +168,43 @@ def divide_data(data, split_rates, device):
         part_indices = indices[prev:end] if i < len(split_thred)-1 else indices[prev:]
         prev = end
         all_indices.append(part_indices)
+
+    masks = list()
+    for i in range(len(all_indices)):
+        part_masks = torch.zeros(data.num_nodes, dtype=torch.bool)
+        part_masks[all_indices[i]] = 1
+        masks.append(part_masks.to(device))
+    return tuple(masks)
+
+
+def divide_data_label_wise(data, split_rates, device, n_class, train_y):
+    # divide training data into several partitions, according to the label distribution
+
+    train_indices_label_wise = dict()
+    for i in range(n_class):
+        train_indices_label_wise[i] = []
+
+    for i, train_idx in enumerate(data.train_indices):
+        data_i_y = int(train_y[i])
+        train_indices_label_wise[data_i_y].append(train_idx)
+
+    all_indices = [[] for _ in range(len(split_rates))]
+    for data_of_y_i in train_indices_label_wise.values():
+        indices = np.array(data_of_y_i)
+        np.random.shuffle(indices)
+
+        split_thred = []
+        accumulated_rate = 0
+        for r in split_rates:
+            accumulated_rate += r
+            split_thred.append(int(len(indices)*accumulated_rate/np.sum(split_rates)))
+
+        prev = 0
+        for i, end in enumerate(split_thred):
+            part_indices = indices[prev:end] if i < len(split_thred)-1 else indices[prev:]
+            prev = end
+            # y_i_indices.append(part_indices)
+            all_indices[i].extend(part_indices)
 
     masks = list()
     for i in range(len(all_indices)):
