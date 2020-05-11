@@ -5,7 +5,7 @@ from __future__ import print_function
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn import Linear
+from torch.nn import Linear, Embedding
 from torch_geometric.nn import GCNConv, JumpingKnowledge
 from sklearn.metrics import accuracy_score
 
@@ -39,7 +39,13 @@ class GCN(torch.nn.Module):
 
     def forward(self, data):
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
-        x = F.relu(self.first_lin(x))
+        #embeds = Embedding(x.shape[0], 8).cuda()
+        #torch.nn.init.xavier_uniform_(embeds.weight.data)
+        #node_idx = x[:,0].long()
+        #node_embed = embeds(node_idx)
+        #x = torch.cat((x[:,1:], node_embed), axis=1)
+        #print(x.shape)
+        x = F.relu(self.first_lin(x[:,1:]))
         x = F.dropout(x, p=self.dropout_rate, training=self.training)
         for conv in self.convs:
             x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
@@ -74,6 +80,7 @@ class GCNAlgo(object):
                  device,
                  config):
 
+        features_num -= 1 
         self._num_class = num_class
         self._features_num = features_num
         self._device = device
