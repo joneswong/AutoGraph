@@ -58,11 +58,12 @@ class GCN(torch.nn.Module):
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
         x = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight))
         for i, conv in enumerate(self.convs):
-            if i == len(self.convs) - 1:
-                x = conv(x, edge_index, edge_weight=edge_weight)
-            else:
-                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-            # x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+            # to discuss: the last_layer_non_relu version has slower speed and not work on dataset d
+            # if i == len(self.convs) - 1:
+            #     x = conv(x, edge_index, edge_weight=edge_weight)
+            # else:
+            #     x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
         x = self.lin2(x)
         # return F.log_softmax(x, dim=-1)
