@@ -7,28 +7,37 @@ import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv
 from sklearn.metrics import accuracy_score
+from .gnns import DirectedGCNConv
 
 from spaces import Categoric, Numeric
 
 from torch_geometric.utils.dropout import dropout_adj
 import numpy as np
 
-# todo (daoyuan) change the GCNConv to DirectedGCNConv
+
 class GCN(torch.nn.Module):
     def __init__(self,
                  num_class,
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0):
+                 hidden_droprate=0.5, edge_droprate=0.0, directed=False):
 
         super(GCN, self).__init__()
-        self.conv1 = GCNConv(features_num, hidden)
-        self.convs = torch.nn.ModuleList()
-        for i in range(num_layers - 1):
-            self.convs.append(GCNConv(hidden, hidden))
-        self.lin2 = Linear(hidden, num_class)
         self.first_lin = Linear(features_num, hidden)
+        if not directed:
+            self.conv1 = GCNConv(hidden, hidden)
+            self.convs = torch.nn.ModuleList()
+            for i in range(num_layers - 1):
+                self.convs.append(GCNConv(hidden, hidden))
+            self.lin2 = Linear(hidden, num_class)
+        else:
+            # incorporate the directed information in the first layer
+            self.conv1 = DirectedGCNConv(hidden, 2 * hidden)  # in the DirectedGCN, we concat the in_f and out_f
+            self.convs = torch.nn.ModuleList()
+            for i in range(num_layers - 1):
+                self.convs.append(GCNConv(2 * hidden, 2 * hidden))
+            self.lin2 = Linear(2 * hidden, num_class)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
 
@@ -47,8 +56,13 @@ class GCN(torch.nn.Module):
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
         x = F.relu(self.first_lin(x))
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+        x = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight))
+        for i, conv in enumerate(self.convs):
+            if i == len(self.convs) - 1:
+                x = conv(x, edge_index, edge_weight=edge_weight)
+            else:
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+            # x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
         x = F.dropout(x, p=self.hidden_droprate, training=self.training)
         x = self.lin2(x)
         # return F.log_softmax(x, dim=-1)
@@ -177,7 +191,7 @@ class GNNAlgo(object):
         cpu = torch.device('cpu')
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
         return {"loss": loss.item(), "accuracy": accuracy}
-    
+
     def pred(self, data, make_decision=True):
         self.model.eval()
         with torch.no_grad():
@@ -200,7 +214,6 @@ class GNNAlgo(object):
 
 
 class GCNAlgo(GNNAlgo):
-
     hyperparam_space = dict(
         num_layers=Categoric(list(range(2, 5)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 16),
@@ -222,9 +235,9 @@ class GCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
-        self.model = GCN(
-            num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0)).to(device)
+        self.model = GCN(num_class, features_num, config.get("num_layers", 2), config.get("hidden", 16),
+                         config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0),
+                         non_hpo_config.get("directed", False)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
@@ -232,4 +245,3 @@ class GCNAlgo(GNNAlgo):
         self._features_num = features_num
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
-

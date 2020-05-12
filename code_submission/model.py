@@ -115,7 +115,9 @@ class Model(object):
         logger.info("remaining {}s after data preparation".format(self._scheduler.get_remaining_time()))
 
         self.non_hpo_config["label_alpha"] = label_weights
-        logger.info("The graph is {}directed graph".format("un-" if data.is_undirected() else ""))
+        is_undirected = data.is_undirected()
+        non_hpo_config["directed"] = not is_undirected
+        logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
         suiable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
         self.non_hpo_config = suitable_non_hpo_config
