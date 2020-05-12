@@ -14,7 +14,7 @@ logger = logging.getLogger('code_submission')
 CV_NUM_FOLD=5
 SAFE_FRAC=0.95
 FINE_TUNE_EPOCH=50
-FINE_TUNE_WHEN_CV=True
+FINE_TUNE_WHEN_CV=False
 
 
 class Ensembler(object):
@@ -23,12 +23,15 @@ class Ensembler(object):
                  early_stopper,
                  config_selection='greedy',
                  training_strategy='cv',
+                 top_k=None,
                  *args,
                  **kwargs):
 
         self._ensembler_early_stopper = early_stopper
         self._config_selection = config_selection
         self._training_strategy = training_strategy
+        if self._config_selection == 'top_k':
+            self.top_k = top_k
 
     def select_configs(self, results):
         """Select configs for training the final model(s)
@@ -43,6 +46,10 @@ class Ensembler(object):
             sorted_results = sorted(results, key=lambda x: get_performance(x[2]))
             optimal = sorted_results[-1]
             return [optimal]
+        elif self._config_selection == 'top_k':
+            reversed_sorted_results = sorted(results, key=lambda x: get_performance(x[2]), reverse=True)
+            top_k = min(self.top_k, len(reversed_sorted_results))
+            return reversed_sorted_results[:top_k]
         else:
             # TO DO: provide other strategies
             pass
@@ -61,7 +68,7 @@ class Ensembler(object):
         logger.info('Final algo is: %s', algo)
         logger.info("to train model(s) with {} config(s)".format(len(opt_records)))
         for opt_record in opt_records:
-            logger.info("searched opt_config is {}.".format(opt_records))
+            logger.info("searched opt_config is {}.".format(opt_record))
         if self._training_strategy == 'cv':
             opt_record = opt_records[0]
             parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device)
@@ -98,7 +105,8 @@ class Ensembler(object):
                 logits = model.pred(data, make_decision=False)
                 part_logits.append(logits.cpu().numpy())
             logger.info("ensemble {} models".format(len(part_logits)))
-            pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
+            # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
+            pred = np.argmax(np.mean(self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
             return pred
         elif self._training_strategy == 'naive':
             # just train a model with the optimal config on the whole labeled samples
@@ -117,6 +125,19 @@ class Ensembler(object):
             logger.info("the final model traverses the whole training data for {} epochs".format(self._ensembler_early_stopper.get_cur_step()))
             pred = torch.argmax(logpr, -1).cpu().numpy().flatten()
             return pred
+        elif self._training_strategy == 'hpo_trials':
+            part_logits = []
+            for i in range(len(opt_records)):
+                path = opt_records[i][4]
+                logits = torch.load(path)['test_results']
+                part_logits.append(logits.cpu().numpy())
+            logger.info("ensemble {} models".format(len(part_logits)))
+            pred = np.argmax(np.mean(self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
+            return pred
         else:
             # TO DO: provide other strategies
             pass
+
+    def softmax(self, x, axis=-1):
+        """Compute softmax values for each sets of scores in x."""
+        return np.exp(x) / np.sum(np.exp(x), axis=axis, keepdims=True)
