@@ -177,6 +177,17 @@ def divide_data(data, split_rates, device):
     return tuple(masks)
 
 
+def calculate_config_dist(tpa, tpb):
+    """Trivially calculate the distance of two configs"""
+
+    ca, cb = tpa[0], tpb[0]
+    num_diff_field = 0
+    for k in ca:
+        if ca[k] != cb[k]:
+            num_diff_field += 1
+    return num_diff_field
+
+
 def divide_data_label_wise(data, split_rates, device, n_class, train_y):
     # divide training data into several partitions, according to the label distribution
 

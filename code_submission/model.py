@@ -33,13 +33,13 @@ ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
 ALGO = ALGOs[1]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
 HPO_STOPPER = STOPPERs[3]
-ENSEMBLER_STOPPER = STOPPERs[3]
+ENSEMBLER_STOPPER = STOPPERs[1]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
 FEATURE_ENGINEERING = True
 non_hpo_config = dict()
-non_hpo_config["LEARN_FROM_SCRATCH"] = True
+non_hpo_config["LEARN_FROM_SCRATCH"] = False
 # todo (daoyuan) dynamic Frac_for_search, on dataset d, GCN has not completed even one entire training,
 #  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
@@ -50,16 +50,18 @@ FIX_FOCAL_LOSS = False
 #                                      save_dir=,
 #                                      num_workers=4)
 
-fix_seed(1234)
-
 
 class Model(object):
 
-    def __init__(self):
+    def __init__(self, seed=1234):
         """Constructor
         only `train_predict()` is measured for timing, put as much stuffs
         here as possible
         """
+
+        # convenient for comparing solutions
+        logger.info("seeding with {}".format(seed))
+        fix_seed(seed)
 
         self.device = torch.device('cuda:0' if torch.cuda.
                                    is_available() else 'cpu')
@@ -73,7 +75,7 @@ class Model(object):
         self.ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
+            early_stopper=self.ensembler_early_stopper, config_selection='top10lo', training_strategy='naive')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
