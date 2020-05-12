@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from early_stoppers import ConstantStopper
-from utils import divide_data, calculate_config_dist
+from utils import divide_data, divide_data_label_wise, calculate_config_dist, get_performance
 
 logger = logging.getLogger('code_submission')
 
@@ -52,6 +52,7 @@ class Ensembler(object):
             return [optimal]
         elif self._config_selection.startswith("top"):
             if self._config_selection.endswith("lo"):
+                # in the form "top(\d+)lo" meaning to
                 # choose the topK local optimals where we approximate this by
                 # sequentially select the most different config (w.r.t. the
                 # previous one) from the top-3K candidates
@@ -68,18 +69,17 @@ class Ensembler(object):
                         if flags[i]:
                             dist = calculate_config_dist(
                                 sorted_results[last_selected],
-                                sorted_results[last_selected])
+                                sorted_results[i])
                             if dist > cur_max_dist:
                                 cur_max_dist = dist
                                 picked_idx = i
-                    if picked_idx != -1:
-                        picked.append(sorted_results[picked_idx])
-                        last_selected = picked_idx
-                        flags[picked_idx] = 0
+                    picked.append(sorted_results[picked_idx])
+                    last_selected = picked_idx
+                    flags[picked_idx] = 0
                 logger.info("choosed {}".format(','.join([str(v) for v in flags])))
                 return picked
             else:
-                # choose the topK
+                # in the form "top(\d+)" meaning to choose the topK
                 K = min(len(sorted_results), int(self._config_selection[3:]))
                 considered = sorted_results[-K:]
                 considered.reverse() 
@@ -97,8 +97,8 @@ class Ensembler(object):
                  algo,
                  opt_records,
                  learn_from_scratch=False,
-                 non_hpo_config=dict()
-                 ):
+                 non_hpo_config=dict(),
+                 train_y=None):
         """Training the model(s) for prediction
             Arguments:
                 n_class (int): the number of categories
@@ -116,7 +116,7 @@ class Ensembler(object):
         logger.info('Final algo is: %s', algo)
         logger.info("to train model(s) with {} config(s)".format(len(opt_records)))
         for opt_record in opt_records:
-            logger.info("searched opt_config is {}.".format(opt_records))
+            logger.info("searched opt_config is {}.".format(opt_record))
 
         if self._training_strategy == 'cv':
             opt_record = opt_records[0]
@@ -163,9 +163,11 @@ class Ensembler(object):
             else:
                 # besides of the diversity of inductive biases, we also
                 # exploit the diversity of their training data
-                parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device)
+                parts = divide_data_label_wise(
+                    data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device, n_class, train_y)
             preds = list()
-            weights = list()
+            config_weights = list()
+            finetuned_model_weights = list()
             for i, opt_record in enumerate(opt_records):
                 model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
                 if not learn_from_scratch:
@@ -190,7 +192,9 @@ class Ensembler(object):
                         activation = model.pred(data, make_decision=False)
                         pr = F.softmax(activation)
                         preds.append(pr)
-                        weights.append(opt_record[2])
+                        config_weights.append(opt_record[2])
+                        if valid_info is not None:
+                            finetuned_model_weights.append(get_performance(valid_info))
                         break
                 logger.info("the {}-th final model traverses the whole \
                              training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
@@ -199,10 +203,16 @@ class Ensembler(object):
                 activation = model.pred(data, make_decision=False)
                 pr = F.softmax(activation)
                 preds.append(pr)
-                weights.append(opt_record[2])
+                config_weights.append(opt_record[2])
             # weighted average the probabilities
-            weights = torch.tensor(np.asarray(weights), dtype=torch.float32).to(device)
-            weights = weights / torch.sum(weights)
+            config_weights = torch.tensor(np.asarray(config_weights), dtype=torch.float32).to(device)
+            config_weights = config_weights / torch.sum(config_weights)
+            if len(finetuned_model_weights):
+                finetuned_model_weights = torch.tensor(np.asarray(finetuned_model_weights), dtype=torch.float32).to(device)
+                finetuned_model_weights = finetuned_model_weights / torch.sum(finetuned_model_weights)
+                weights = 0.5 * (config_weights + finetuned_model_weights)
+            else:
+                weights = config_weights
             logger.info("average {} models with their validation performances {}".format(len(preds), weights))
             single_shape = preds[0].shape
             preds = torch.reshape(torch.stack(preds), weights.shape+single_shape)
