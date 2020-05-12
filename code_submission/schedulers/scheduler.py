@@ -7,6 +7,7 @@ import time
 import copy
 
 from spaces import Categoric, Numeric
+from utils import get_performance
 
 logger = logging.getLogger('code_submission')
 
@@ -62,12 +63,12 @@ class Scheduler(object):
         return should_early_stop
 
     def record(self, algo, valid_info):
-        """record (config, ckpt_path, valid_info, #epochs) for a trial"""
+        """record (config, ckpt_path, valid_accuracy, #epochs) for a trial"""
 
         path = "team_common_hpo_{}.pt".format(len(self._results))
         algo.save_model(path)
         self._results.append(
-            (copy.deepcopy(self._cur_config), path, valid_info, self._early_stopper.get_cur_step()))
+            (copy.deepcopy(self._cur_config), path, get_performance(valid_info), self._early_stopper.get_cur_step()))
 
     def get_default(self):
         results = dict()
@@ -81,9 +82,9 @@ class Scheduler(object):
                     results[k] = v.default_value
         return results
 
-    def pred(self, n_class, num_features, device, data, algo, learn_from_scratch=False, non_hpo_config=dict()):
+    def pred(self, n_class, num_features, device, data, algo, learn_from_scratch=False, non_hpo_config=dict(), train_y=None):
         considered_configs = self._ensembler.select_configs(self._results)
         predictions = self._ensembler.ensemble(
             n_class, num_features, device, data, self, algo,
-            considered_configs, learn_from_scratch, non_hpo_config)
+            considered_configs, learn_from_scratch, non_hpo_config, train_y)
         return predictions
