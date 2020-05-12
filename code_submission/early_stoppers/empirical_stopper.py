@@ -16,7 +16,7 @@ WINDOW_SIZE = 20
 
 class EmpiricalStopper(Stopper):
 
-    def __init__(self, min_step=40, max_step=800):
+    def __init__(self, min_step=30, max_step=500):
         self._min_step = max(min_step, WINDOW_SIZE)
         self._max_step = max_step
         self.performance_windows = [None for i in range(WINDOW_SIZE)]
