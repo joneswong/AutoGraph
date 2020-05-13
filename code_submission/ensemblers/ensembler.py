@@ -133,13 +133,26 @@ class Ensembler(object):
             logger.info("searched opt_config is {}.".format(opt_record))
 
         if self._training_strategy == 'cv':
-            return self.cv_ensumbler(opt_records, data, device, n_class, num_features,
-                   scheduler, algo, learn_from_scratch, non_hpo_config)
+            preds = self.cv_ensumbler(opt_records, data, device, n_class, num_features,
+                                      scheduler, algo, learn_from_scratch, non_hpo_config)
+            pred = torch.argmax(torch.mean(preds, 0), -1).flatten()
+            return pred.cpu().numpy()
         elif self._training_strategy == 'naive':
-            return self.naive_ensumbler(opt_records, data, device, n_class, num_features,
-                   scheduler, algo, learn_from_scratch, non_hpo_config, train_y)
+            weighted_preds = self.naive_ensumbler(opt_records, data, device, n_class, num_features,
+                                 scheduler, algo, learn_from_scratch, non_hpo_config, train_y)
+            pred = torch.argmax(torch.mean(weighted_preds, 0), -1).flatten()
+            return pred.cpu().numpy()
         elif self._training_strategy == 'hpo_trials':
-            return self.hpo_history_ensumbler(opt_records, device)
+            weighted_preds = self.hpo_history_ensumbler(opt_records, device)
+            pred = torch.argmax(torch.mean(weighted_preds, 0), -1).flatten()
+            return pred.cpu().numpy()
+        elif self._training_strategy == 'hybrid':
+            weighted_preds_of_hpo_trials = self.hpo_history_ensumbler(opt_records, device)
+            weighted_preds_of_naive_results = self.naive_ensumbler(opt_records, data, device, n_class, num_features,
+                                                                   scheduler, algo, learn_from_scratch, non_hpo_config, train_y)
+            weighted_preds = torch.cat([weighted_preds_of_hpo_trials, weighted_preds_of_naive_results], 0)
+            pred = torch.argmax(torch.mean(weighted_preds, 0), -1).flatten()
+            return pred.cpu().numpy()
         else:
             # TO DO: provide other strategies
             pass
@@ -180,9 +193,8 @@ class Ensembler(object):
             logits = model.pred(data, make_decision=False)
             part_logits.append(logits)
         logger.info("ensemble {} models".format(len(part_logits)))
-        # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
-        pred = torch.argmax(torch.mean(F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
-        return pred.cpu().numpy()
+        preds = F.softmax(torch.stack(part_logits), -1)
+        return preds
 
     def naive_ensumbler(self, opt_records, data, device, n_class, num_features, scheduler, algo, learn_from_scratch, non_hpo_config, train_y):
         if len(opt_records) == 1:
@@ -244,9 +256,8 @@ class Ensembler(object):
         logger.info("average {} models with their validation performances {}".format(len(preds), weights))
         single_shape = preds[0].shape
         preds = torch.reshape(torch.stack(preds), weights.shape + single_shape)
-        preds = torch.mean(torch.reshape(weights, weights.shape + (1, 1)) * preds, 0)
-        pred = torch.argmax(preds, -1).cpu().numpy().flatten()
-        return pred
+        weighted_preds = torch.reshape(weights, weights.shape + (1, 1)) * preds
+        return weighted_preds
 
     def hpo_history_ensumbler(self, opt_records, device):
         part_logits = []
@@ -258,5 +269,5 @@ class Ensembler(object):
         weights = torch.tensor(
             np.array([[[item[2]['accuracy']]] for item in opt_records]),
             dtype=torch.float32).to(device)
-        pred = torch.argmax(torch.mean(weights * F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
-        return pred.cpu().numpy()
+        weights_preds = weights * F.softmax(torch.stack(part_logits), -1)
+        return weights_preds
