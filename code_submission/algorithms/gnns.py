@@ -47,11 +47,14 @@ class SplineGCN(torch.nn.Module):
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
-        for conv in self.convs:
+        for i, conv in enumerate(self.convs):
             # todo (daoyuan) add layer_norm
             x = x if self.fea_norm_layer is None else self.fea_norm_layer(x)
             x = F.dropout(x, p=self.droprate, training=self.training)
-            x = F.elu(conv(x, edge_index, edge_weight))
+            if i == len(self.convs)-1:
+                x = conv(x, edge_index, edge_weight)
+            else:
+                x = F.elu(conv(x, edge_index, edge_weight))
         # return F.log_softmax(x, dim=-1)
         # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
         return x

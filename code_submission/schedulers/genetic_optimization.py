@@ -9,7 +9,6 @@ import copy
 
 from schedulers import Scheduler
 from spaces import Categoric, Numeric
-from utils import get_performance
 
 
 class GeneticOptimizer(Scheduler):

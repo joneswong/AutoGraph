@@ -13,6 +13,7 @@ from spaces import Categoric, Numeric
 from torch_geometric.utils.dropout import dropout_adj
 import numpy as np
 
+
 # todo (daoyuan) change the GCNConv to DirectedGCNConv
 class GCN(torch.nn.Module):
     def __init__(self,
