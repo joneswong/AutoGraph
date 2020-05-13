@@ -23,3 +23,5 @@ class GreedyStrategy(Ensembler):
             model = algo(n_class, features_num, device, config)
             model.load_model(optimal[1])
         return model
+
+

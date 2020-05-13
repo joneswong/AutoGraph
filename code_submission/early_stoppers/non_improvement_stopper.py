@@ -25,7 +25,7 @@ class NonImprovementStopper(Stopper):
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
-        cur_performance = -valid_info['logloss']
+        cur_performance = -valid_info['loss']
         # cur_performance = valid_info['accuracy']
         if cur_performance > self._max_performance:
             self._step_with_max_performance = self._cur_step

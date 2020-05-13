@@ -72,6 +72,9 @@ def _parse_args():
                         default=default_code_dir,
                         help="Directory storing the submission code "
                              "`model.py` and other necessary packages.")
+    parser.add_argument('--seed', type=int,
+                        default=1234,
+                        help="seed used for all packages")
     parser.add_argument('--score_dir', type=str,
                         default=default_score_dir,
                         help="Directory storing the scoring output "
@@ -195,13 +198,14 @@ def main():
     LOGGER.info('===== Load data.')
     dataset = Dataset(args.dataset_dir)
     time_budget = dataset.get_metadata().get("time_budget")
+    # time_budget = time_budget * 2  # used for off-line search
     n_class = dataset.get_metadata().get("n_class")
     schema = dataset.get_metadata().get("schema")
 
     LOGGER.info(f"Time budget: {time_budget}")
 
     LOGGER.info("===== import user model")
-    umodel = init_usermodel()
+    umodel = init_usermodel(args.seed)
 
     LOGGER.info("===== Begin training user model")
     timer = _init_timer(time_budget)
