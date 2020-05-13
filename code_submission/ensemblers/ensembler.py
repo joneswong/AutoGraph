@@ -133,119 +133,130 @@ class Ensembler(object):
             logger.info("searched opt_config is {}.".format(opt_record))
 
         if self._training_strategy == 'cv':
-            opt_record = opt_records[0]
-            parts = divide_data(data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device)
-            part_logits = list()
-            cur_valid_part_idx = 0
-            while (not scheduler.should_stop(SAFE_FRAC)) and (cur_valid_part_idx < CV_NUM_FOLD):
-                model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
-                if not learn_from_scratch:
-                    model.load_model(opt_record[1])
-                train_mask = torch.sum(
-                    torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
-                valid_mask = parts[cur_valid_part_idx]
-                self._ensembler_early_stopper.reset()
-                while not scheduler.should_stop(SAFE_FRAC):
-                    train_info = model.train(data, train_mask)
-                    valid_info = model.valid(data, valid_mask)
-                    if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
-                        logits = model.pred(data, make_decision=False)
-                        part_logits.append(logits.cpu().numpy())
-                        break
-                if FINE_TUNE_WHEN_CV:
-                    # naive version: enhance the model by train with the valid/whole data part
-                    i = 0
-                    # todo: add some other heuristic method to set the small_epoch,
-                    #  e.g., the average epochs of the stopper
-                    while not scheduler.should_stop(SAFE_FRAC) and i < FINE_TUNE_EPOCH:
-                        # model.train(data, valid_mask)  # fine-tune on the un-seen valid set
-                        model.train(data, data.train_mask)  # fine-tune on the whole data
-                        i += 1
-                    logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
-                cur_valid_part_idx += 1
-            if len(part_logits) == 0:
-                logger.warn("have not completed even one training course")
-                logits = model.pred(data, make_decision=False)
-                part_logits.append(logits)
-            logger.info("ensemble {} models".format(len(part_logits)))
-            # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
-            pred = torch.argmax(torch.mean(F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
-            return pred.cpu().numpy()
+            return self.cv_ensumbler(opt_records, data, device, n_class, num_features,
+                   scheduler, algo, learn_from_scratch, non_hpo_config)
         elif self._training_strategy == 'naive':
-            if len(opt_records) == 1:
-                # just train a model with the optimal config on the whole labeled samples
-                pass
-            else:
-                # besides of the diversity of inductive biases, we also
-                # exploit the diversity of their training data
-                parts = divide_data_label_wise(
-                    data, CV_NUM_FOLD*[10/CV_NUM_FOLD], device, n_class, train_y)
-            preds = list()
-            config_weights = list()
-            finetuned_model_weights = list()
-            for i, opt_record in enumerate(opt_records):
-                model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
-                if not learn_from_scratch:
-                    model.load_model(opt_record[1])
-                if len(opt_records) == 1:
-                    train_mask = data.train_mask
-                    valid_mask = None
-                else:
-                    train_mask = torch.sum(
-                        torch.stack([m for j, m in enumerate(parts) if j != (i%CV_NUM_FOLD)]), 0).type(torch.bool)
-                    valid_mask = parts[i%CV_NUM_FOLD]
-                self._ensembler_early_stopper.reset()
-                while not scheduler.should_stop(SAFE_FRAC):
-                    train_info = model.train(data, train_mask)
-                    if valid_mask is not None:
-                        valid_info = model.valid(data, valid_mask)
-                    else:
-                        # currently, this only cooperates with fixed #epochs
-                        valid_info = None
-                    if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) and \
-                       (not learn_from_scratch or self._ensembler_early_stopper.get_cur_step() >= opt_record[3]):
-                        activation = model.pred(data, make_decision=False)
-                        pr = F.softmax(activation)
-                        preds.append(pr)
-                        config_weights.append(opt_record[2])
-                        if valid_info is not None:
-                            finetuned_model_weights.append(valid_info['accuracy'])
-                        break
-                logger.info("the {}-th final model traverses the whole \
-                             training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
-            if len(preds) == 0:
-                logger.warn("have not completed even one training course")
-                activation = model.pred(data, make_decision=False)
-                pr = F.softmax(activation)
-                preds.append(pr)
-                config_weights.append(opt_record[2])
-            # weighted average the probabilities
-            config_weights = torch.tensor(np.asarray(config_weights), dtype=torch.float32).to(device)
-            config_weights = config_weights / torch.sum(config_weights)
-            if len(finetuned_model_weights):
-                finetuned_model_weights = torch.tensor(np.asarray(finetuned_model_weights), dtype=torch.float32).to(device)
-                finetuned_model_weights = finetuned_model_weights / torch.sum(finetuned_model_weights)
-                weights = 0.5 * (config_weights + finetuned_model_weights)
-            else:
-                weights = config_weights
-            logger.info("average {} models with their validation performances {}".format(len(preds), weights))
-            single_shape = preds[0].shape
-            preds = torch.reshape(torch.stack(preds), weights.shape+single_shape)
-            preds = torch.mean(torch.reshape(weights, weights.shape+(1, 1)) * preds, 0)
-            pred = torch.argmax(preds, -1).cpu().numpy().flatten()
-            return pred
+            return self.naive_ensumbler(opt_records, data, device, n_class, num_features,
+                   scheduler, algo, learn_from_scratch, non_hpo_config, train_y)
         elif self._training_strategy == 'hpo_trials':
-            part_logits = []
-            for i in range(len(opt_records)):
-                path = opt_records[i][4]
-                logits = torch.load(path)['test_results']
-                part_logits.append(logits)
-            logger.info("ensemble {} models".format(len(part_logits)))
-            weights = torch.tensor(
-                np.array([[[item[2]['accuracy']]] for item in opt_records]),
-                dtype=torch.float32).to(device)
-            pred = torch.argmax(torch.mean(weights * F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
-            return pred.cpu().numpy()
+            return self.hpo_history_ensumbler(opt_records, device)
         else:
             # TO DO: provide other strategies
             pass
+
+    def cv_ensumbler(self, opt_records, data, device, n_class, num_features, scheduler, algo, learn_from_scratch, non_hpo_config):
+        opt_record = opt_records[0]
+        parts = divide_data(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device)
+        part_logits = list()
+        cur_valid_part_idx = 0
+        while (not scheduler.should_stop(SAFE_FRAC)) and (cur_valid_part_idx < CV_NUM_FOLD):
+            model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
+            if not learn_from_scratch:
+                model.load_model(opt_record[1])
+            train_mask = torch.sum(
+                torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
+            valid_mask = parts[cur_valid_part_idx]
+            self._ensembler_early_stopper.reset()
+            while not scheduler.should_stop(SAFE_FRAC):
+                train_info = model.train(data, train_mask)
+                valid_info = model.valid(data, valid_mask)
+                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
+                    logits = model.pred(data, make_decision=False)
+                    part_logits.append(logits.cpu().numpy())
+                    break
+            if FINE_TUNE_WHEN_CV:
+                # naive version: enhance the model by train with the valid/whole data part
+                i = 0
+                # todo: add some other heuristic method to set the small_epoch,
+                #  e.g., the average epochs of the stopper
+                while not scheduler.should_stop(SAFE_FRAC) and i < FINE_TUNE_EPOCH:
+                    # model.train(data, valid_mask)  # fine-tune on the un-seen valid set
+                    model.train(data, data.train_mask)  # fine-tune on the whole data
+                    i += 1
+                logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
+            cur_valid_part_idx += 1
+        if len(part_logits) == 0:
+            logger.warn("have not completed even one training course")
+            logits = model.pred(data, make_decision=False)
+            part_logits.append(logits)
+        logger.info("ensemble {} models".format(len(part_logits)))
+        # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
+        pred = torch.argmax(torch.mean(F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+        return pred.cpu().numpy()
+
+    def naive_ensumbler(self, opt_records, data, device, n_class, num_features, scheduler, algo, learn_from_scratch, non_hpo_config, train_y):
+        if len(opt_records) == 1:
+            # just train a model with the optimal config on the whole labeled samples
+            pass
+        else:
+            # besides of the diversity of inductive biases, we also
+            # exploit the diversity of their training data
+            parts = divide_data_label_wise(
+                data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
+        preds = list()
+        config_weights = list()
+        finetuned_model_weights = list()
+        for i, opt_record in enumerate(opt_records):
+            model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
+            if not learn_from_scratch:
+                model.load_model(opt_record[1])
+            if len(opt_records) == 1:
+                train_mask = data.train_mask
+                valid_mask = None
+            else:
+                train_mask = torch.sum(
+                    torch.stack([m for j, m in enumerate(parts) if j != (i % CV_NUM_FOLD)]), 0).type(torch.bool)
+                valid_mask = parts[i % CV_NUM_FOLD]
+            self._ensembler_early_stopper.reset()
+            while not scheduler.should_stop(SAFE_FRAC):
+                train_info = model.train(data, train_mask)
+                if valid_mask is not None:
+                    valid_info = model.valid(data, valid_mask)
+                else:
+                    # currently, this only cooperates with fixed #epochs
+                    valid_info = None
+                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) and \
+                        (not learn_from_scratch or self._ensembler_early_stopper.get_cur_step() >= opt_record[3]):
+                    activation = model.pred(data, make_decision=False)
+                    pr = F.softmax(activation)
+                    preds.append(pr)
+                    config_weights.append(opt_record[2]['accuracy'])
+                    if valid_info is not None:
+                        finetuned_model_weights.append(valid_info['accuracy'])
+                    break
+            logger.info("the {}-th final model traverses the whole \
+                         training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
+        if len(preds) == 0:
+            logger.warn("have not completed even one training course")
+            activation = model.pred(data, make_decision=False)
+            pr = F.softmax(activation)
+            preds.append(pr)
+            config_weights.append(opt_record[2]['accuracy'])
+        # weighted average the probabilities
+        config_weights = torch.tensor(np.asarray(config_weights), dtype=torch.float32).to(device)
+        # config_weights = config_weights / torch.sum(config_weights)
+        if len(finetuned_model_weights):
+            finetuned_model_weights = torch.tensor(np.asarray(finetuned_model_weights), dtype=torch.float32).to(device)
+            # finetuned_model_weights = finetuned_model_weights / torch.sum(finetuned_model_weights)
+            weights = 0.5 * (config_weights + finetuned_model_weights)
+        else:
+            weights = config_weights
+        logger.info("average {} models with their validation performances {}".format(len(preds), weights))
+        single_shape = preds[0].shape
+        preds = torch.reshape(torch.stack(preds), weights.shape + single_shape)
+        preds = torch.mean(torch.reshape(weights, weights.shape + (1, 1)) * preds, 0)
+        pred = torch.argmax(preds, -1).cpu().numpy().flatten()
+        return pred
+
+    def hpo_history_ensumbler(self, opt_records, device):
+        part_logits = []
+        for i in range(len(opt_records)):
+            path = opt_records[i][4]
+            logits = torch.load(path)['test_results']
+            part_logits.append(logits)
+        logger.info("ensemble {} models".format(len(part_logits)))
+        weights = torch.tensor(
+            np.array([[[item[2]['accuracy']]] for item in opt_records]),
+            dtype=torch.float32).to(device)
+        pred = torch.argmax(torch.mean(weights * F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+        return pred.cpu().numpy()
