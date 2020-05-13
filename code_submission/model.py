@@ -46,7 +46,8 @@ FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
 DATA_SPLIT_FOR_EACH_TRIAL = True
 SAVE_TEST_RESULTS = True
-TOP_K = 10
+# set to None: choose k automatically
+TOP_K = None
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
 #                                      num_steps=5, sample_coverage=1000,

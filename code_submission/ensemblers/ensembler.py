@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import torch
 
-from utils import get_performance, divide_data
+from utils import divide_data
 
 logger = logging.getLogger('code_submission')
 
@@ -43,12 +43,30 @@ class Ensembler(object):
 
         logger.info("to select config(s) from {} candidates".format(len(results)))
         if self._config_selection == 'greedy':
-            sorted_results = sorted(results, key=lambda x: get_performance(x[2]))
+            sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
             optimal = sorted_results[-1]
             return [optimal]
         elif self._config_selection == 'top_k':
-            reversed_sorted_results = sorted(results, key=lambda x: get_performance(x[2]), reverse=True)
-            top_k = min(self.top_k, len(reversed_sorted_results))
+            reversed_sorted_results = sorted(results, key=lambda x: x[2]['accuracy'], reverse=True)
+            # find top k configs as required
+            if self.top_k is not None:
+                top_k = min(self.top_k, len(reversed_sorted_results))
+                return reversed_sorted_results[:top_k]
+
+            # find top k configs automatically
+            for item in reversed_sorted_results:
+                print(item)
+            print('---------\n\n')
+            top_k = 0
+            best_performance = reversed_sorted_results[0][2]['accuracy']
+            # pre_performance = best_performance
+            for i in range(len(reversed_sorted_results)):
+                cur_performance = reversed_sorted_results[i][2]['accuracy']
+                if best_performance-cur_performance > 0.1: # or (pre_performance-cur_performance)>0.03
+                    top_k = i
+                    break
+                top_k = i + 1
+                # pre_performance = cur_performance
             return reversed_sorted_results[:top_k]
         else:
             # TO DO: provide other strategies
@@ -132,7 +150,8 @@ class Ensembler(object):
                 logits = torch.load(path)['test_results']
                 part_logits.append(logits.cpu().numpy())
             logger.info("ensemble {} models".format(len(part_logits)))
-            pred = np.argmax(np.mean(self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
+            weights = np.array([[[item[2]['accuracy']]] for item in opt_records])
+            pred = np.argmax(np.mean(weights * self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
             return pred
         else:
             # TO DO: provide other strategies
