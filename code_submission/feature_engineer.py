@@ -23,6 +23,14 @@ def _pca_processing(data, pca_threshold=0.75):
     data = pca.fit_transform(data)
     return data
 
+def _check_file_exist(file_path, flag_directed_graph):
+    if flag_directed_graph and os.path.exists(os.path.join(file_path,'NR_EB/STRAP_strap_frpca_d_U.csv')) and os.path.exists(os.path.join(file_path,'NR_EB/STRAP_strap_frpca_d_V.csv')):
+        return True
+    elif (not flag_directed_graph) and os.path.exists(os.path.join(file_path,'NR_EB/STRAP_strap_frpca_u_V.csv')):
+        return True
+    else:
+        return False
+
 def get_neighbor_label_distribution(edges, y, n_class):
     EPSILON = 1e-8
     num_nodes = len(y)
@@ -81,23 +89,30 @@ def run_STRAP(num_nodes, edges, flag_directed_graph, epsilon=1e6, dims=128):
     rc, out = subprocess.getstatusoutput(run_commands)
     print('STRAP_commands return: ', rc, out)
 
-    if flag_directed_graph:
-        node_embed_u = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_U.csv'), header=None)
-        if node_embed_u.isnull().values.any():
-            node_embed_u.fillna(0.0)
-            print('find nan in node_embed_U')
-        node_embed_v = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_V.csv'), header=None)
-        if node_embed_v.isnull().values.any():
-            node_embed_v.fillna(0.0)
-            print('find nan in node_embed_V')
-        node_embed = np.concatenate([node_embed_u, node_embed_v], axis=1)
+    if _check_file_exist(file_path, flag_directed_graph):
+        flag_error = False
+        
+        if flag_directed_graph:
+            node_embed_u = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_U.csv'), header=None)
+            if node_embed_u.isnull().values.any():
+                node_embed_u.fillna(0.0)
+                print('find nan in node_embed_U')
+            node_embed_v = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_V.csv'), header=None)
+            if node_embed_v.isnull().values.any():
+                node_embed_v.fillna(0.0)
+                print('find nan in node_embed_V')
+            node_embed = np.concatenate([node_embed_u, node_embed_v], axis=1)
+        else:
+            node_embed = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_u_U.csv'), header=None)
+            if node_embed.isnull().values.any():
+                node_embed_u.fillna(0.0)
+                print('find nan in node_embed_U')
     else:
-        node_embed = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_u_U.csv'), header=None)
-        if node_embed.isnull().values.any():
-            node_embed_u.fillna(0.0)
-            print('find nan in node_embed_U')
+        print('Error: no such file!')
+        flag_error = True
+        node_embed = []
     
-    return node_embed
+    return flag_error, node_embed
     
 def dim_reduction(x):
     #remove uninformative col
@@ -127,8 +142,9 @@ def feature_generation(x, y, n_class, edges, flag_none_feature, flag_directed_gr
         print('degree time_cost: ', time.time() - start_time)
 
     if use_node_embed:
-        node_embed = run_STRAP(num_nodes, edges, flag_directed_graph)
-        added_features.append(node_embed)
+        flag_error, node_embed = run_STRAP(num_nodes, edges, flag_directed_graph)
+        if not flag_error:
+            added_features.append(node_embed)
         print('node_embed time cost: ', time.time() - start_time)
 
     return added_features
