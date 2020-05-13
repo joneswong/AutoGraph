@@ -11,7 +11,8 @@ import pandas as pd
 import torch
 from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
-from torch_geometric.utils import degree
+from torch_geometric.utils import degree, is_undirected
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger('code_submission')
 
@@ -24,7 +25,7 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_generation=False):
+def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generation=True):
     x = data['fea_table']
 
     df = data['edge_file']
@@ -43,24 +44,27 @@ def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_genera
 
     train_indices = data['train_indices']
     test_indices = data['test_indices']
+    
+
+    flag_directed_graph = not is_undirected(edge_index)
 
     ###   feature engineering  ###
-    non_feature = False
+    flag_none_feature = False
     if use_dim_reduction:
-        x, non_feature = dim_reduction(x)
+        x, flag_none_feature = dim_reduction(x)
     else:
-        if x.shape[1] == 1:
-            x = x.to_numpy()
-            x = x.reshape(x.shape[0])
-            x = np.array(pd.get_dummies(x))
-            non_feature = True
-        else:
-            x = x.drop('node_index', axis=1).to_numpy()
-
+        x = x.to_numpy()
+        flag_none_feature = (x.shape[1] == 1)
+    
     if use_feature_generation:
-        added_features = feature_generation(x, y, n_class, edge_index, non_feature)
+        added_features = feature_generation(x, y, n_class, edge_index, flag_none_feature, flag_directed_graph)
         x = np.concatenate([x]+added_features, axis=1)
 
+    if x.shape[1] != 1:
+        #remove raw node_index 
+        x = x[:,1:]
+
+    print('x.shape after feature engineering: ', x.shape)
     x = torch.tensor(x, dtype=torch.float)
 
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
@@ -175,7 +179,6 @@ def divide_data(data, split_rates, device):
         part_masks[all_indices[i]] = 1
         masks.append(part_masks.to(device))
     return tuple(masks)
-
 
 def calculate_config_dist(tpa, tpb):
     """Trivially calculate the distance of two configs"""
