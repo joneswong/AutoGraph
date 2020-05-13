@@ -11,10 +11,8 @@ import pandas as pd
 import torch
 from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
-from torch_geometric.utils import degree
+from torch_geometric.utils import degree, is_undirected
 from sklearn.preprocessing import StandardScaler
-import subprocess
-import os
 
 logger=logger = logging.getLogger('code_submission')
 
@@ -27,14 +25,13 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generation=False):
+def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generation=True):
     x = data['fea_table']
 
     df = data['edge_file']
     edge_index = df[['src_idx', 'dst_idx']].to_numpy()
     edge_index = sorted(edge_index, key=lambda d: d[0])
     edge_index = torch.tensor(edge_index, dtype=torch.long).transpose(0, 1)
-
 
     edge_weight = df['edge_weight'].to_numpy()
     edge_weight = torch.tensor(edge_weight, dtype=torch.float32)
@@ -49,33 +46,25 @@ def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generat
     test_indices = data['test_indices']
     
 
+    flag_directed_graph = not is_undirected(edge_index)
+
     ###   feature engineering  ###
-    non_feature = False
+    flag_none_feature = False
     if use_dim_reduction:
-        x, non_feature = dim_reduction(x)
+        x, flag_none_feature = dim_reduction(x)
     else:
         x = x.to_numpy()
-
-    if x.shape[1] == 1:
-        #x = x.to_numpy()
-        #x = x.reshape(x.shape[0])
-        #x = np.array(pd.get_dummies(x))
-        non_feature = True
-    #else:
-        #x = x.drop('node_index', axis=1).to_numpy()
-        #x = x.to_numpy()
-        #ss = StandardScaler()
-        #x = ss.fit_transform(x)
+        flag_none_feature = (x.shape[1] == 1)
     
-    #rw = np.load('e_v.npy')
-    node_embed = run_STRAP(num_nodes, edge_index)
-    x = np.concatenate([x,node_embed], axis=1)
-
     if use_feature_generation:
-        added_features = feature_generation(x, y, n_class, edge_index, non_feature)
+        added_features = feature_generation(x, y, n_class, edge_index, flag_none_feature, flag_directed_graph)
         x = np.concatenate([x]+added_features, axis=1)
 
-    print(x.shape)
+    if x.shape[1] != 1:
+        #remove raw node_index 
+        x = x[:,1:]
+
+    print('x.shape after feature engineering: ', x.shape)
     x = torch.tensor(x, dtype=torch.float)
 
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
@@ -125,54 +114,4 @@ def divide_data(data, split_rates, device):
         part_masks[all_indices[i]] = 1
         masks.append(part_masks.to(device))
     return tuple(masks)
-
-def run_STRAP(num_nodes, edges):
-    start_time = time.time()
-    file_path = os.path.dirname(__file__)
-
-    data_dir = file_path + '/NR_Dataset'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-    embed_dir = file_path + '/NR_EB'
-    if not os.path.exists(embed_dir):
-        os.makedirs(embed_dir)
-    edges = edges.numpy().transpose([1,0])
-
-    #write edge file
-    w_str = str(num_nodes)+'\n'
-    num_edges = len(edges)
-    if num_edges > 5e6:
-        STRAP_epsilon = 5e-3
-    else:
-        STRAP_epsilon = 1e-4
-
-    foo = lambda x: str(x[0])+' '+str(x[1]) if x[0] < x[1] else str(x[1])+' '+str(x[0])
-    w_str += '\n'.join(map(foo , edges))
-    #print(time.time() - start_time)
-    with open(os.path.join(data_dir,'STRAP.txt'),'w') as f:
-        f.write(w_str)
-
-    #run_commands = "./code_submission/temp_STRAP_FRPCA_U STRAP ./code_submission/NR_Dataset/ ./code_submission/NR_EB/ 0.5 12 0.0001 24"
-    run_commands = ' '.join([os.path.join(file_path,'STRAP_FRPCA_U'),
-                    'STRAP',
-                    data_dir+'/',
-                    embed_dir+'/',
-                    '0.5 12',
-                    str(STRAP_epsilon),
-                    '24 128'])
-    #print(run_commands)
-    rc, out = subprocess.getstatusoutput(run_commands)
-    #print(rc, out)
-
-    node_embed = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_u_U.csv'), header=None)
-    if node_embed.isnull().values.any():
-        node_embed.fillna(0.0)
-        print('find nan in node_embed')
-
-    time_cost = time.time() - start_time
-    with open('time_cost','a') as f:
-        f.write(str(time_cost)+'\n')
-    print('time cost of runing STRAP: ',time_cost)
-    
-    return node_embed.to_numpy()
 
