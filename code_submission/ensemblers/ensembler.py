@@ -9,14 +9,14 @@ import torch
 import torch.nn.functional as F
 
 from early_stoppers import ConstantStopper
-from utils import divide_data, divide_data_label_wise, calculate_config_dist, get_performance
+from utils import divide_data, divide_data_label_wise, calculate_config_dist
 
 logger = logging.getLogger('code_submission')
 
 CV_NUM_FOLD=5
 SAFE_FRAC=0.95
 FINE_TUNE_EPOCH=50
-FINE_TUNE_WHEN_CV=True
+FINE_TUNE_WHEN_CV=False
 
 
 class Ensembler(object):
@@ -44,8 +44,7 @@ class Ensembler(object):
         """
 
         logger.info("to select config(s) from {} candidates".format(len(results)))
-        sorted_results = sorted(results, key=lambda x: x[2])
-
+        sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
         if self._config_selection == 'greedy':
             # choose the best one
             optimal = sorted_results[-1]
@@ -82,8 +81,23 @@ class Ensembler(object):
                 # in the form "top(\d+)" meaning to choose the topK
                 K = min(len(sorted_results), int(self._config_selection[3:]))
                 considered = sorted_results[-K:]
-                considered.reverse() 
+                considered.reverse()
                 return considered
+        elif self._config_selection == 'auto':
+            reversed_sorted_results = sorted(results, key=lambda x: x[2]['accuracy'], reverse=True)
+
+            # find top k configs automatically
+            top_k = 0
+            best_performance = reversed_sorted_results[0][2]['accuracy']
+            # pre_performance = best_performance
+            for i in range(len(reversed_sorted_results)):
+                cur_performance = reversed_sorted_results[i][2]['accuracy']
+                if best_performance-cur_performance > 0.1: # or (pre_performance-cur_performance)>0.03
+                    top_k = i
+                    break
+                top_k = i + 1
+                # pre_performance = cur_performance
+            return reversed_sorted_results[:top_k]
         else:
             # provide other strategies
             pass
@@ -108,7 +122,7 @@ class Ensembler(object):
                 scheduler (obj): protect us from time limit exceeding
                 algo (cls): to be instantiated with given config(s)
                 opt_records (list): given config(s)
-                learn_from_scratch (bool): restore from the ckpt(s) or 
+                learn_from_scratch (bool): restore from the ckpt(s) or
                                            random initialize the parameters
             Returns: predictions (np.ndarray)
         """
@@ -152,10 +166,11 @@ class Ensembler(object):
             if len(part_logits) == 0:
                 logger.warn("have not completed even one training course")
                 logits = model.pred(data, make_decision=False)
-                part_logits.append(logits.cpu().numpy())
+                part_logits.append(logits)
             logger.info("ensemble {} models".format(len(part_logits)))
-            pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
-            return pred
+            # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
+            pred = torch.argmax(torch.mean(F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+            return pred.cpu().numpy()
         elif self._training_strategy == 'naive':
             if len(opt_records) == 1:
                 # just train a model with the optimal config on the whole labeled samples
@@ -194,7 +209,7 @@ class Ensembler(object):
                         preds.append(pr)
                         config_weights.append(opt_record[2])
                         if valid_info is not None:
-                            finetuned_model_weights.append(get_performance(valid_info))
+                            finetuned_model_weights.append(valid_info['accuracy'])
                         break
                 logger.info("the {}-th final model traverses the whole \
                              training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
@@ -219,6 +234,18 @@ class Ensembler(object):
             preds = torch.mean(torch.reshape(weights, weights.shape+(1, 1)) * preds, 0)
             pred = torch.argmax(preds, -1).cpu().numpy().flatten()
             return pred
+        elif self._training_strategy == 'hpo_trials':
+            part_logits = []
+            for i in range(len(opt_records)):
+                path = opt_records[i][4]
+                logits = torch.load(path)['test_results']
+                part_logits.append(logits)
+            logger.info("ensemble {} models".format(len(part_logits)))
+            weights = torch.tensor(
+                np.array([[[item[2]['accuracy']]] for item in opt_records]),
+                dtype=torch.float32).to(device)
+            pred = torch.argmax(torch.mean(weights * F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+            return pred.cpu().numpy()
         else:
             # TO DO: provide other strategies
             pass

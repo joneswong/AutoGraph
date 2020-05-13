@@ -82,7 +82,7 @@ class GeneticOptimizer(Scheduler):
         return h
 
     def gen_next_population(self):
-        performance = self._results[-1][2]
+        performance = self._results[-1][2]['accuracy']
         if len(self._population) < self._max_population:
             self._population.append((copy.deepcopy(self._cur_config), performance))
         else:

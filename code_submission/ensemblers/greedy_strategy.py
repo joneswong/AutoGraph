@@ -13,7 +13,7 @@ class GreedyStrategy(Ensembler):
         super(GreedyStrategy, self).__init__(finetune)
 
     def boost(self, n_class, features_num, device, data, results, algo):
-        sorted_results = sorted(results, key=lambda x: get_performance(x[2]))
+        sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
         optimal = sorted_results[-1]
         if self._finetune:
             # TO DO: implement
