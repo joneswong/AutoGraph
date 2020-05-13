@@ -30,20 +30,22 @@ logger.addHandler(handler)
 logger.propagate = False
 
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
-ALGO = ALGOs[1]
+ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
 HPO_STOPPER = STOPPERs[3]
-ENSEMBLER_STOPPER = STOPPERs[1]
+ENSEMBLER_STOPPER = STOPPERs[3]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
-FEATURE_ENGINEERING = True
+FEATURE_ENGINEERING = False
 non_hpo_config = dict()
 non_hpo_config["LEARN_FROM_SCRATCH"] = False
 # todo (daoyuan) dynamic Frac_for_search, on dataset d, GCN has not completed even one entire training,
 #  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
+DATA_SPLIT_FOR_EACH_TRIAL = True
+SAVE_TEST_RESULTS = True
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
 #                                      num_steps=5, sample_coverage=1000,
@@ -71,11 +73,15 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        self.hpo_early_stopper = HPO_STOPPER(max_step=400)
+        self.hpo_early_stopper = HPO_STOPPER(max_step=500)
         self.ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
+        # self.ensembler = ENSEMBLER(
+        #     early_stopper=self.ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
+        # self.ensembler = ENSEMBLER(
+        #     early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
+            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hpo_trials')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
@@ -111,9 +117,12 @@ class Model(object):
             data = generate_pyg_data(data, n_class).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
-        # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
-        train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(data, [7, 1, 2], self.device,
-                                                                                n_class, train_y)
+
+        train_mask, early_valid_mask, final_valid_mask = None, None, None
+        if not DATA_SPLIT_FOR_EACH_TRIAL:
+            # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
+            train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(
+                data, [7, 1, 2], self.device, n_class, train_y)
         logger.info("remaining {}s after data preparation".format(self._scheduler.get_remaining_time()))
 
         self.non_hpo_config["label_alpha"] = label_weights
@@ -136,7 +145,10 @@ class Model(object):
                 early_stop_valid_info = algo.valid(data, early_valid_mask)
                 if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
                     valid_info = algo.valid(data, final_valid_mask)
-                    self._scheduler.record(algo, valid_info)
+                    test_results = None
+                    if SAVE_TEST_RESULTS:
+                        test_results = algo.pred(data, make_decision=False)
+                    self._scheduler.record(algo, valid_info, test_results)
                     algo = None
             else:
                 # trigger a new trial
@@ -147,12 +159,19 @@ class Model(object):
                         self.non_hpo_config["label_alpha"] = label_weights
                         config["loss_type"] = "focal_loss"
                     algo = ALGO(n_class, data.x.size()[1], self.device, config, self.non_hpo_config)
+                    if DATA_SPLIT_FOR_EACH_TRIAL:
+                        # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
+                        train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(
+                            data, [7, 1, 2], self.device, n_class, train_y)
                 else:
                     # have exhausted the search space
                     break
         if algo is not None:
             valid_info = algo.valid(data, final_valid_mask)
-            self._scheduler.record(algo, valid_info)
+            test_results = None
+            if SAVE_TEST_RESULTS:
+                test_results = algo.pred(data, make_decision=False)
+            self._scheduler.record(algo, valid_info, test_results)
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
         pred = self._scheduler.pred(

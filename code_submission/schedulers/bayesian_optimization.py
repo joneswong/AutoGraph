@@ -51,7 +51,7 @@ class BayesianOptimizer(Scheduler):
         self._early_stopper.reset()
 
         if len(self._results) != 0:
-            self.bayesian_optimizer.register(params=self.bo_params, target=get_performance(self._results[-1][2]))
+            self.bayesian_optimizer.register(params=self.bo_params, target=self._results[-1][2]['accuracy'])
             self.bo_params = self.bayesian_optimizer.suggest(self.utility)
             self._cur_config.update(self.bo_params)
             for key, value in self._hyperparam_space.items():
