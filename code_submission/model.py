@@ -37,7 +37,7 @@ ENSEMBLER_STOPPER = STOPPERs[3]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
-FEATURE_ENGINEERING = False
+FEATURE_ENGINEERING = True
 non_hpo_config = dict()
 non_hpo_config["LEARN_FROM_SCRATCH"] = False
 # todo (daoyuan) dynamic Frac_for_search, on dataset d, GCN has not completed even one entire training,
