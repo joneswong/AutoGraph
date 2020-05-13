@@ -166,11 +166,11 @@ class Ensembler(object):
             if len(part_logits) == 0:
                 logger.warn("have not completed even one training course")
                 logits = model.pred(data, make_decision=False)
-                part_logits.append(logits.cpu().numpy())
+                part_logits.append(logits)
             logger.info("ensemble {} models".format(len(part_logits)))
             # pred = np.argmax(np.mean(np.stack(part_logits), 0), -1).flatten()
-            pred = np.argmax(np.mean(self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
-            return pred
+            pred = torch.argmax(torch.mean(F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+            return pred.cpu().numpy()
         elif self._training_strategy == 'naive':
             if len(opt_records) == 1:
                 # just train a model with the optimal config on the whole labeled samples
@@ -239,15 +239,13 @@ class Ensembler(object):
             for i in range(len(opt_records)):
                 path = opt_records[i][4]
                 logits = torch.load(path)['test_results']
-                part_logits.append(logits.cpu().numpy())
+                part_logits.append(logits)
             logger.info("ensemble {} models".format(len(part_logits)))
-            weights = np.array([[[item[2]['accuracy']]] for item in opt_records])
-            pred = np.argmax(np.mean(weights * self.softmax(np.stack(part_logits), -1), 0), -1).flatten()
-            return pred
+            weights = torch.tensor(
+                np.array([[[item[2]['accuracy']]] for item in opt_records]),
+                dtype=torch.float32).to(device)
+            pred = torch.argmax(torch.mean(weights * F.softmax(torch.stack(part_logits), -1), 0), -1).flatten()
+            return pred.cpu().numpy()
         else:
             # TO DO: provide other strategies
             pass
-
-    def softmax(self, x, axis=-1):
-        """Compute softmax values for each sets of scores in x."""
-        return np.exp(x) / np.sum(np.exp(x), axis=axis, keepdims=True)
