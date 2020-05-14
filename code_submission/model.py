@@ -32,7 +32,7 @@ logger.propagate = False
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
 ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
-HPO_STOPPER = STOPPERs[3]
+HPO_STOPPER = STOPPERs[0]
 ENSEMBLER_STOPPER = STOPPERs[3]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
@@ -81,7 +81,7 @@ class Model(object):
         # self.ensembler = ENSEMBLER(
         #     early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hpo_trials')
+            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
