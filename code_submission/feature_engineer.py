@@ -11,10 +11,9 @@ from torch_geometric.data import Data
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from torch_geometric.utils import degree
-from sklearn.preprocessing import StandardScaler,Normalizer
+from sklearn.preprocessing import StandardScaler
 import subprocess
 import os
-from multiprocessing import Pool
 
 
 def _pca_processing(data, pca_threshold=0.75):
@@ -78,15 +77,13 @@ def run_STRAP(num_nodes, edges, flag_directed_graph, epsilon=1e6, dims=128):
     #write edge file
     num_edges = len(edges)
     if num_edges > epsilon:
-        STRAP_epsilon = 5e-4
+        STRAP_epsilon = 5e-3
     else:
         STRAP_epsilon = 1e-4
 
     if flag_directed_graph:
-        #with Pool(8) as p:
         _tmp = map(_foo_directed, edges)
     else:
-        #with Pool(8) as p:
         _tmp = map(_foo_undirected, edges)
     write_str =str(num_nodes)+'\n' + '\n'.join(_tmp)
 
