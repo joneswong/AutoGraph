@@ -2,16 +2,19 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv
+from torch_geometric.utils.dropout import dropout_adj
 from sklearn.metrics import accuracy_score
 
 from spaces import Categoric, Numeric
 
-from torch_geometric.utils.dropout import dropout_adj
-import numpy as np
+logger = logging.getLogger('code_submission')
 
 
 # todo (daoyuan) change the GCNConv to DirectedGCNConv
@@ -24,7 +27,6 @@ class GCN(torch.nn.Module):
                  hidden_droprate=0.5, edge_droprate=0.0):
 
         super(GCN, self).__init__()
-        self.conv1 = GCNConv(features_num, hidden)
         self.convs = torch.nn.ModuleList()
         for i in range(num_layers - 1):
             self.convs.append(GCNConv(hidden, hidden))
@@ -35,7 +37,6 @@ class GCN(torch.nn.Module):
 
     def reset_parameters(self):
         self.first_lin.reset_parameters()
-        self.conv1.reset_parameters()
         for conv in self.convs:
             conv.reset_parameters()
         self.lin2.reset_parameters()
@@ -58,6 +59,20 @@ class GCN(torch.nn.Module):
 
     def __repr__(self):
         return self.__class__.__name__
+
+    @classmethod
+    def bottleneck_tensor_size(cls,
+                               num_nodes,
+                               num_edges,
+                               n_class,
+                               features_num,
+                               num_layers=2,
+                               hidden=16,
+                               hidden_droprate=0.5,
+                               edge_droprate=0.0):
+        """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
+        # each float/int occupies 4 bytes
+        return 4 * (num_nodes+num_edges) * hidden
 
 
 class FocalLoss(torch.nn.Module):
@@ -204,8 +219,8 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(2, 5)), None, 3),
-        hidden=Categoric([16, 32, 64, 128], None, 32),
+        num_layers=Categoric(list(range(2, 5)), None, 2),
+        hidden=Categoric([16, 32, 64, 128], None, 16),
         hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
@@ -236,3 +251,35 @@ class GCNAlgo(GNNAlgo):
         self._features_num = features_num
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
+
+    @classmethod
+    def is_memory_safe(cls,
+                       num_nodes,
+                       num_edges,
+                       n_class,
+                       features_num,
+                       config,
+                       non_hpo_config=None):
+        """estimate the (gpu/cpu) memory consumption"""
+        num_bytes = GCN.bottleneck_tensor_size(
+                        num_nodes, num_edges, n_class, features_num,
+                        config.get("num_layers", 2), config.get("hidden", 16),
+                        config.get("hidden_droprate", 0.5),
+                        config.get("edge_droprate", 0.0))
+        # very reservative in this way
+        # `MessageParsing` provides an implementation of `propagate()`
+        # where tensors of `bottleneck_tensor_size` are allocated twice during
+        # the lifecycle of this `propagate()`. We consider the worst case
+        # where the first has been allocated and `torch.cuda.cached_memory()`
+        # is just less than `bottleneck_tensor_size`. In this case, torch
+        # tries to request the `bottleneck_tensor_size` additional memory
+        # from cuda. If there is no free memory larger than what required,
+        # OOM would be triggered. In a word, worst case we need three times of
+        # the `bottleneck_tensor_size`. This very ad-hoc estimation serves as
+        # a workaround here.
+        is_safe = 3*num_bytes <= 16000000000
+        if is_safe:
+            logger.debug("=== a safe config {} ===".format(config))
+        else:
+            logger.warn("=== an unsafe config {} ===".format(config))
+        return is_safe

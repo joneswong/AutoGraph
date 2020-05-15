@@ -7,7 +7,6 @@ import time
 
 import torch
 
-
 # from algorithms import GraphSAINTRandomWalkSampler
 from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
 from algorithms.model_selection import select_algo_from_data
@@ -18,7 +17,6 @@ from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import *
 from torch_geometric.data import DataLoader
-
 
 logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
@@ -150,10 +148,20 @@ class Model(object):
                         test_results = algo.pred(data, make_decision=False)
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
+                    torch.cuda.empty_cache()
             else:
                 # trigger a new trial
-                config = self._scheduler.get_next_config()
-
+                is_memory_safe = False
+                valid_info = None
+                while not is_memory_safe:
+                    if valid_info:
+                        self._scheduler.record(None, valid_info)
+                    else:
+                        valid_info = dict(accuracy=.0)
+                    config = self._scheduler.get_next_config()
+                    is_memory_safe = ALGO.is_memory_safe(
+                        data.x.size()[0], data.edge_weight.size()[0],
+                        n_class, data.x.size()[1], config, None)
                 if config:
                     if FIX_FOCAL_LOSS:
                         self.non_hpo_config["label_alpha"] = label_weights
@@ -172,6 +180,8 @@ class Model(object):
             if SAVE_TEST_RESULTS:
                 test_results = algo.pred(data, make_decision=False)
             self._scheduler.record(algo, valid_info, test_results)
+            algo = None
+            torch.cuda.empty_cache()
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
         pred = self._scheduler.pred(

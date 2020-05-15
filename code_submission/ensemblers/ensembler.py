@@ -188,6 +188,7 @@ class Ensembler(object):
                     i += 1
                 logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
             cur_valid_part_idx += 1
+            
         if len(part_logits) == 0:
             logger.warn("have not completed even one training course")
             logits = model.pred(data, make_decision=False)
@@ -209,6 +210,7 @@ class Ensembler(object):
         config_weights = list()
         finetuned_model_weights = list()
         for i, opt_record in enumerate(opt_records):
+            torch.cuda.empty_cache()
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])

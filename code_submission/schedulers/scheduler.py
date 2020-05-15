@@ -66,7 +66,8 @@ class Scheduler(object):
         """record (config, ckpt_path, valid_info, #epochs) for a trial"""
 
         model_path = "team_common_hpo_{}.pt".format(len(self._results))
-        algo.save_model(model_path)
+        if algo:
+            algo.save_model(model_path)
         test_results_path = ''
         if test_results is not None:
             test_results_path = "test_results_of_hpo_{}.pt".format(len(self._results))
