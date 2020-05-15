@@ -231,10 +231,9 @@ class Ensembler(object):
                 if valid_mask is not None:
                     valid_info = model.valid(data, valid_mask)
                 else:
-                    # currently, this only cooperates with fixed #epochs
-                    valid_info = None
-                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) and \
-                        (not learn_from_scratch or self._ensembler_early_stopper.get_cur_step() >= opt_record[3]):
+                    # if only one config, no validation info, utilize training info
+                    valid_info = train_info
+                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
                     activation = model.pred(data, make_decision=False)
                     pr = F.softmax(activation)
                     preds.append(pr)
