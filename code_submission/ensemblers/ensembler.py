@@ -164,7 +164,7 @@ class Ensembler(object):
         parts = divide_data(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device)
         part_logits = list()
         cur_valid_part_idx = 0
-        while (not scheduler.should_stop(SAFE_FRAC)) and (cur_valid_part_idx < CV_NUM_FOLD):
+        while (not scheduler.should_stop(SAFE_FRAC)): # and (cur_valid_part_idx < CV_NUM_FOLD):
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])
@@ -189,7 +189,9 @@ class Ensembler(object):
                     model.train(data, data.train_mask)  # fine-tune on the whole data
                     i += 1
                 logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
-            cur_valid_part_idx += 1
+            cur_valid_part_idx = (cur_valid_part_idx + 1) % CV_NUM_FOLD
+            if cur_valid_part_idx == 0:
+                parts = divide_data(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device)
         if len(part_logits) == 0:
             logger.warn("have not completed even one training course")
             logits = model.pred(data, make_decision=False)
@@ -210,7 +212,9 @@ class Ensembler(object):
         preds = list()
         config_weights = list()
         finetuned_model_weights = list()
-        for i, opt_record in enumerate(opt_records):
+        cur_index = 0
+        while not scheduler.should_stop(SAFE_FRAC):
+            opt_record = opt_records[cur_index % len(opt_records)]
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])
@@ -219,8 +223,8 @@ class Ensembler(object):
                 valid_mask = None
             else:
                 train_mask = torch.sum(
-                    torch.stack([m for j, m in enumerate(parts) if j != (i % CV_NUM_FOLD)]), 0).type(torch.bool)
-                valid_mask = parts[i % CV_NUM_FOLD]
+                    torch.stack([m for j, m in enumerate(parts) if j != (cur_index % CV_NUM_FOLD)]), 0).type(torch.bool)
+                valid_mask = parts[cur_index % CV_NUM_FOLD]
             self._ensembler_early_stopper.reset()
             while not scheduler.should_stop(SAFE_FRAC):
                 train_info = model.train(data, train_mask)
@@ -241,7 +245,13 @@ class Ensembler(object):
                         finetuned_model_weights.append(1.0)
                     break
             logger.info("the {}-th final model traverses the whole \
-                         training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
+                         training data for {} epochs".format(cur_index, self._ensembler_early_stopper.get_cur_step()))
+            cur_index = cur_index + 1
+            if cur_index % CV_NUM_FOLD == 0:
+                if len(opt_records) == 1:
+                    pass
+                else:
+                    parts = divide_data_label_wise(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
         if len(preds) == 0:
             logger.warn("have not completed even one training course")
             activation = model.pred(data, make_decision=False)
