@@ -11,9 +11,10 @@ from torch_geometric.data import Data
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from torch_geometric.utils import degree
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,Normalizer
 import subprocess
 import os
+from multiprocessing import Pool
 
 
 def _pca_processing(data, pca_threshold=0.75):
@@ -30,6 +31,13 @@ def _check_file_exist(file_path, flag_directed_graph):
         return True
     else:
         return False
+
+def normalize(x):
+    norm_time = time.time()
+    norm = list(map(lambda y: np.linalg.norm(np.unique(y),keepdims=True), x))
+    x = x/np.array(norm, dtype=np.float32)
+    print('normlization time cost: ', time.time()-norm_time)
+    return x.transpose(1,0)
 
 def get_neighbor_label_distribution(edges, y, n_class):
     EPSILON = 1e-8
@@ -51,6 +59,12 @@ def get_node_degree(nodes, num_nodes):
     node_degree = degree(nodes, num_nodes)
     return np.expand_dims(node_degree, axis=-1)
 
+def _foo_directed(x):
+    return str(x[0])+' '+str(x[1])
+
+def _foo_undirected(x):
+    return str(x[0])+' '+str(x[1]) if x[0] < x[1] else str(x[1])+' '+str(x[0])
+
 def run_STRAP(num_nodes, edges, flag_directed_graph, epsilon=1e6, dims=128):
     file_path = os.path.dirname(__file__)
     data_dir = file_path + '/NR_Dataset'
@@ -64,15 +78,17 @@ def run_STRAP(num_nodes, edges, flag_directed_graph, epsilon=1e6, dims=128):
     #write edge file
     num_edges = len(edges)
     if num_edges > epsilon:
-        STRAP_epsilon = 5e-3
+        STRAP_epsilon = 5e-4
     else:
         STRAP_epsilon = 1e-4
 
     if flag_directed_graph:
-        foo = lambda x: str(x[0])+' '+str(x[1])
+        #with Pool(8) as p:
+        _tmp = map(_foo_directed, edges)
     else:
-        foo = lambda x: str(x[0])+' '+str(x[1]) if x[0] < x[1] else str(x[1])+' '+str(x[0])
-    write_str =str(num_nodes)+'\n' + '\n'.join(map(foo , edges))
+        #with Pool(8) as p:
+        _tmp = map(_foo_undirected, edges)
+    write_str =str(num_nodes)+'\n' + '\n'.join(_tmp)
 
     with open(os.path.join(data_dir,'STRAP.txt'),'w') as f:
         f.write(write_str)
@@ -121,6 +137,9 @@ def dim_reduction(x):
     #all the features are uninformative except node_index
     flag_none_feature = (len(drop_col) == len(x.columns)-1)
     x = x.drop(drop_col,axis=1).to_numpy()
+    
+    if not flag_none_feature:
+        x = np.concatenate([x[:,0:1], normalize(x[:,1:].transpose(1,0))], axis=1)
 
     return x, flag_none_feature
 
