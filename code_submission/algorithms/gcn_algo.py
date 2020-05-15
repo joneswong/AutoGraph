@@ -12,7 +12,12 @@ from .gnns import DirectedGCNConv
 from spaces import Categoric, Numeric
 
 from torch_geometric.utils.dropout import dropout_adj
+from torch_geometric.utils import subgraph
 import numpy as np
+from torch_geometric.data import DataLoader, NeighborSampler
+import copy
+
+from itertools import product
 
 
 class GCN(torch.nn.Module):
@@ -151,6 +156,7 @@ class GNNAlgo(object):
         self._features_num = features_num
         self._device = device
         self._num_class = num_class
+        self._num_layer = config.get("num_layers", 2)
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
             config.get("hidden", 16), config.get("hidden_droprate", 0.5)).to(device)
@@ -161,22 +167,104 @@ class GNNAlgo(object):
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
-    def train(self, data, data_mask):
+    def collate(self, data_list):
+        r"""Collates a python list of data objects to the internal storage
+        format of :class:`torch_geometric.data.InMemoryDataset`."""
+        keys = data_list[0].keys
+        data = data_list[0].__class__()
+
+        for key in keys:
+            data[key] = []
+        slices = {key: [0] for key in keys}
+
+        for item, key in product(data_list, keys):
+            data[key].append(item[key])
+            if torch.is_tensor(item[key]):
+                s = slices[key][-1] + item[key].size(
+                    item.__cat_dim__(key, item[key]))
+            else:
+                s = slices[key][-1] + 1
+            slices[key].append(s)
+
+        if hasattr(data_list[0], '__num_nodes__'):
+            data.__num_nodes__ = []
+            for item in data_list:
+                data.__num_nodes__.append(item.num_nodes)
+
+        for key in keys:
+            item = data_list[0][key]
+            if torch.is_tensor(item):
+                data[key] = torch.cat(data[key],
+                                      dim=data.__cat_dim__(key, item))
+            elif isinstance(item, int) or isinstance(item, float):
+                data[key] = torch.tensor(data[key])
+
+            slices[key] = torch.tensor(slices[key], dtype=torch.long)
+
+        return data, slices
+
+    def train(self, data, data_mask, config):
         self.model.train()
         self._optimizer.zero_grad()
-        if self.loss_type == "focal_loss":
-            loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask])
-        elif self.loss_type == "ce_loss":
-            loss = F.cross_entropy(self.model(data)[data_mask], data.y[data_mask])
+        total_loss = torch.zeros(1)
+        steps = 0
+        if config["mini_batch"]:
+            loader = self.get_sub_graph(data, data_mask)
+            loader = NeighborSampler(data, size=config["layer_sample_size"], batch_size=config["batch_size"],
+                                     num_hops=self._num_layer, shuffle=False, drop_last=False, bipartite=False)
+            for batch in loader(data_mask):
+                batch.edge_weight = None if data.edge_weight is None else data.edge_weight[batch.e_id]
+                batch.x = data.x[batch.n_id]
+                batch.to(self._device)
+                if self.loss_type == "focal_loss":
+                    loss = self.fl_loss(self.model(batch)[batch.sub_b_id], data.y[batch.b_id].to(self._device))
+                elif self.loss_type == "ce_loss":
+                    loss = F.cross_entropy(self.model(batch)[batch.sub_b_id], data.y[batch.b_id].to(self._device))
+                else:
+                    raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
+                loss.backward()
+                self._optimizer.step()
+                total_loss += loss
+                steps += 1
         else:
-            raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
-        loss.backward()
-        self._optimizer.step()
+            data.to(self._device)
+            if self.loss_type == "focal_loss":
+                loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask])
+            elif self.loss_type == "ce_loss":
+                loss = F.cross_entropy(self.model(data)[data_mask], data.y[data_mask])
+            else:
+                raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
+            loss.backward()
+            self._optimizer.step()
+            total_loss += loss
+            steps += 1
         # We may need values other than loss for making better decisions on
         # when to stop the training course
-        return {"loss": loss.item()}
+        # return {"loss": loss.item()}
+        return {"loss": (total_loss/steps).item()}
 
-    def valid(self, data, data_mask):
+    def get_sub_graph_loader(self, config, data, data_mask):
+        sub_data_nodes = torch.nonzero(data_mask)
+        sub_edge_index, sub_edge_weight = subgraph(sub_data_nodes, data.edge_index, data.edge_weight)
+        tmp_data = copy.deepcopy(data)
+        tmp_data.edge_index = sub_edge_index
+        tmp_data.edge_weight = sub_edge_weight
+
+        tmp_data, indices = self.collate([tmp_data])
+
+        loader = DataLoader([tmp_data], config["batch_size"])
+        return loader
+
+    def get_sub_graph(self, data, data_mask):
+        sub_data_nodes = torch.nonzero(data_mask)
+        sub_edge_index, sub_edge_weight = subgraph(sub_data_nodes, data.edge_index, data.edge_weight)
+        tmp_data = copy.deepcopy(data)
+        tmp_data.edge_index = sub_edge_index
+        tmp_data.edge_weight = sub_edge_weight
+
+        return tmp_data
+
+    def valid(self, data, data_mask, use_mini_batch):
         self.model.eval()
         with torch.no_grad():
             validation_output = self.model(data)[data_mask]
@@ -193,7 +281,7 @@ class GNNAlgo(object):
         accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
         return {"loss": loss.item(), "accuracy": accuracy}
 
-    def pred(self, data, make_decision=True):
+    def pred(self, data, make_decision=True, use_mini_batch=False):
         self.model.eval()
         with torch.no_grad():
             if make_decision:
@@ -236,6 +324,7 @@ class GCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
+        self._num_layer = config.get("num_layers", 2)
         self.model = GCN(num_class, features_num, config.get("num_layers", 2), config.get("hidden", 16),
                          config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0),
                          non_hpo_config.get("directed", False)).to(device)

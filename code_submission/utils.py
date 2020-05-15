@@ -177,7 +177,7 @@ def divide_data(data, split_rates, device):
     return tuple(masks)
 
 
-def divide_data_label_wise(data, split_rates, device, n_class, train_y):
+def divide_data_label_wise(data, split_rates, n_class, train_y):
     # divide training data into several partitions, according to the label distribution
 
     train_indices_label_wise = dict()
@@ -210,5 +210,7 @@ def divide_data_label_wise(data, split_rates, device, n_class, train_y):
     for i in range(len(all_indices)):
         part_masks = torch.zeros(data.num_nodes, dtype=torch.bool)
         part_masks[all_indices[i]] = 1
-        masks.append(part_masks.to(device))
+        # masks.append(part_masks.to(device))
+        # first generate batches on cpu
+        masks.append(part_masks)
     return tuple(masks)

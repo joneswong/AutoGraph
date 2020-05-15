@@ -60,6 +60,7 @@ class SplineGCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
+        self._num_layer = config.get("num_layers", 2)
         self.model = SplineGCN(
             config.get("num_layers", 2), config.get("hidden", 16), features_num, num_class,
             config.get("hidden_droprate", 0.5), config.get("dim", 1),
