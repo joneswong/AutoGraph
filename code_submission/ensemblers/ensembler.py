@@ -45,6 +45,8 @@ class Ensembler(object):
 
         logger.info("to select config(s) from {} candidates".format(len(results)))
         sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
+        # for item in sorted_results:
+        #     print(item)
         if self._config_selection == 'greedy':
             # choose the best one
             optimal = sorted_results[-1]
@@ -235,6 +237,8 @@ class Ensembler(object):
                     config_weights.append(opt_record[2]['accuracy'])
                     if valid_info is not None:
                         finetuned_model_weights.append(valid_info['accuracy'])
+                    else:
+                        finetuned_model_weights.append(1.0)
                     break
             logger.info("the {}-th final model traverses the whole \
                          training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
