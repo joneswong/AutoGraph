@@ -21,7 +21,7 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0):
+                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False):
 
         super(GCN, self).__init__()
         self.conv1 = GCNConv(features_num, hidden)
@@ -32,6 +32,7 @@ class GCN(torch.nn.Module):
         self.first_lin = Linear(features_num, hidden)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
+        self.use_res = bool(use_res)
 
     def reset_parameters(self):
         self.first_lin.reset_parameters()
@@ -46,12 +47,25 @@ class GCN(torch.nn.Module):
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
-        x = F.relu(self.first_lin(x))
-        x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-        x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-        x = self.lin2(x)
+
+        if not self.use_res:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            for conv in self.convs:
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+        else:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x_list = [x]
+            for conv in self.convs:
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                x_list.append(x)
+            x = torch.sum(torch.stack(x_list, 0), 0)
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+
         # return F.log_softmax(x, dim=-1)
         # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
         return x
@@ -210,11 +224,14 @@ class GCNAlgo(GNNAlgo):
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
         # edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),
-        edge_droprate=Categoric([0.], None, 0.0),
+        # edge_droprate=Categoric([0.0, 0.15, 0.3, 0.45, 0.6], None, 0.0),
+        edge_droprate=Categoric([0.0], None, 0.0),
+        # edge_droprate=Categoric([0.0, 0.1, 0.2, 0.3], None, 0.0),
         # feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
+        use_res=Categoric([0., 1.], None, 0.)
     )
 
     def __init__(self,
@@ -228,7 +245,7 @@ class GCNAlgo(GNNAlgo):
         self._num_class = num_class
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0)).to(device)
+            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0), config.get("use_res", 0.0)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
