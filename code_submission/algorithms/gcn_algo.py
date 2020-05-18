@@ -285,6 +285,10 @@ class GCNAlgo(GNNAlgo):
             if len(new_hidden_list) == 0:
                 new_hidden_list = [max_hidden_units]
             GCNAlgo.hyperparam_space['hidden'].categories = new_hidden_list
+            if GCNAlgo.hyperparam_space['hidden'].default_value not in new_hidden_list:
+                GCNAlgo.hyperparam_space['hidden'].default_value = new_hidden_list[0]
+            return True
+        return False
 
     @classmethod
     def is_memory_safe(cls,
