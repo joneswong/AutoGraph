@@ -11,6 +11,7 @@ from torch.nn import Linear
 from torch_geometric.nn import GCNConv
 from torch_geometric.utils.dropout import dropout_adj
 from sklearn.metrics import accuracy_score
+from .gnns import DirectedGCNConv
 
 from spaces import Categoric, Numeric
 
@@ -24,17 +25,23 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False, directed=False):
 
         super(GCN, self).__init__()
+        self.first_lin = Linear(features_num, hidden)
         self.convs = torch.nn.ModuleList()
+        if directed:
+            self.convs.append(DirectedGCNConv(hidden, hidden * 2))
+            hidden = hidden * 2
+        else:
+            self.convs.append(GCNConv(hidden, hidden))
         for i in range(num_layers - 1):
             self.convs.append(GCNConv(hidden, hidden))
         self.lin2 = Linear(hidden, num_class)
-        self.first_lin = Linear(features_num, hidden)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
         self.use_res = bool(use_res)
+        self.directed = directed
 
     def reset_parameters(self):
         self.first_lin.reset_parameters()
@@ -59,7 +66,7 @@ class GCN(torch.nn.Module):
         else:
             x = F.relu(self.first_lin(x))
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x_list = [x]
+            x_list = [] if self.directed else [x]
             for conv in self.convs:
                 x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
                 x_list.append(x)
@@ -233,7 +240,7 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(2, 5)), None, 3),
+        num_layers=Categoric(list(range(1, 4)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 32),
         hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
@@ -260,7 +267,10 @@ class GCNAlgo(GNNAlgo):
         self._num_class = num_class
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0), config.get("use_res", 0.0)).to(device)
+            config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+            config.get("edge_droprate", 0.0), config.get("use_res", 0.0),
+            non_hpo_config.get("directed", False)).to(device)
+            # False).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
@@ -274,8 +284,11 @@ class GCNAlgo(GNNAlgo):
                            num_nodes,
                            num_edges,
                            n_class,
-                           features_num):
+                           features_num,
+                           directed):
         max_hidden_units = max(int(16000000000 / 3 / 4 / (num_nodes+num_edges)), 1)
+        if directed:
+            max_hidden_units = int(max_hidden_units/2)
         hidden_list = GCNAlgo.hyperparam_space['hidden'].categories
         if max_hidden_units < max(hidden_list):
             new_hidden_list = []
