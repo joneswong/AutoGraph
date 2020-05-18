@@ -135,8 +135,13 @@ class Model(object):
             ALGO = suiable_algo
         # loader = DataLoader(data, batch_size=32, shuffle=True)
 
-        ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0],
-                                n_class, data.x.size()[1])
+        change_hyper_space = ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0], n_class, data.x.size()[1])
+        if change_hyper_space:
+            self._hyperparam_space = ALGO.hyperparam_space
+            logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
+            remain_time_budget = self._scheduler.get_remaining_time()
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler.setup_timer(remain_time_budget)
 
         algo = None
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
@@ -155,7 +160,6 @@ class Model(object):
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
-
                 # is_memory_safe = False
                 # valid_info = None
                 # while not is_memory_safe:
