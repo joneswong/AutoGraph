@@ -25,7 +25,7 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generation=True):
+def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_feature_generation=True):
     x = data['fea_table']
 
     df = data['edge_file']
@@ -57,16 +57,19 @@ def generate_pyg_data(data, n_class, use_dim_reduction=True, use_feature_generat
         flag_none_feature = (x.shape[1] == 1)
     
     if use_feature_generation:
-        added_features = feature_generation(x, y, n_class, edge_index, flag_none_feature, flag_directed_graph)
+        added_features = feature_generation(x, y, n_class, edge_index, edge_weight,  flag_none_feature, flag_directed_graph, time_budget)
         x = np.concatenate([x]+added_features, axis=1)
 
     if x.shape[1] != 1:
         #remove raw node_index 
         x = x[:,1:]
 
-    print('x.shape after feature engineering: ', x.shape)
+    logger.info('x.shape after feature engineering: {}'.format(x.shape))
     x = torch.tensor(x, dtype=torch.float)
 
+    non_zero_index = torch.nonzero(edge_weight).reshape(-1)
+    edge_weight = edge_weight[non_zero_index]
+    edge_index = edge_index[:,non_zero_index]
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
 
     data.num_nodes = num_nodes
