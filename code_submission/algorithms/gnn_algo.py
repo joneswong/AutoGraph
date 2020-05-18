@@ -72,6 +72,26 @@ class SplineGCNAlgo(GNNAlgo):
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
+    @classmethod
+    def is_memory_safe(cls,
+                       num_nodes,
+                       num_edges,
+                       n_class,
+                       features_num,
+                       config,
+                       non_hpo_config=None):
+        # (daoyuan) TO DO: implement
+        return True
+
+    @classmethod
+    def ensure_memory_safe(cls,
+                       num_nodes,
+                       num_edges,
+                       n_class,
+                       features_num):
+        # (daoyuan) TO DO: implement
+        pass
+
 
 class SplineGCN_APPNPAlgo(GNNAlgo):
     hyperparam_space = dict(
@@ -108,6 +128,3 @@ class SplineGCN_APPNPAlgo(GNNAlgo):
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
         self.focal_loss = focal_loss
-
-
-
