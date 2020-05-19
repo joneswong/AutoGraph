@@ -126,7 +126,6 @@ class FocalLoss(torch.nn.Module):
         one_hot_target = torch.zeros([N, C], dtype=torch.float32, device=categorical_y.device)
         one_hot_target.scatter_(1, categorical_y, 1)
 
-        input = input
         pt = F.softmax(input)
 
         # # hard implementation
