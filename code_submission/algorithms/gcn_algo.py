@@ -25,7 +25,7 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False, directed=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False):
 
         super(GCN, self).__init__()
         self.first_lin = Linear(features_num, hidden)
@@ -40,7 +40,7 @@ class GCN(torch.nn.Module):
         self.lin2 = Linear(hidden, num_class)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
-        self.use_res = bool(use_res)
+        self.res_type = res_type
         self.directed = directed
 
     def reset_parameters(self):
@@ -56,7 +56,7 @@ class GCN(torch.nn.Module):
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
 
-        if not self.use_res:
+        if self.res_type == 0.0:
             x = F.relu(self.first_lin(x))
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             for conv in self.convs:
@@ -70,7 +70,10 @@ class GCN(torch.nn.Module):
             for conv in self.convs:
                 x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
                 x_list.append(x)
-            x = torch.sum(torch.stack(x_list, 0), 0)
+            if self.res_type == 1.0:
+                x = x + x_list[0]
+            elif self.res_type == 2.0:
+                x = torch.sum(torch.stack(x_list, 0), 0)
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             x = self.lin2(x)
 
@@ -256,7 +259,7 @@ class GCNAlgo(GNNAlgo):
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
-        use_res=Categoric([0., 1.], None, 0.)
+        res_type=Categoric([0., 1., 2.0], None, 0.)
     )
 
     def __init__(self,
@@ -271,7 +274,7 @@ class GCNAlgo(GNNAlgo):
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
             config.get("hidden", 16), config.get("hidden_droprate", 0.5),
-            config.get("edge_droprate", 0.0), config.get("use_res", 0.0),
+            config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
             non_hpo_config.get("directed", False)).to(device)
             # False).to(device)
         self._optimizer = torch.optim.Adam(
