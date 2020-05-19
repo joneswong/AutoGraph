@@ -178,6 +178,7 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
                         'STRAP', data_dir+'/', embed_dir+'/',
                         '0.5 12', str(STRAP_epsilon), '8', str(dims)])
         cmd_return = subprocess.run(run_commands, shell=True, timeout=timeout)
+        flag_error = False
         #logger.info('chomod commands return: {}'.format(proc.returncode))
     except subprocess.TimeoutExpired as timeout_msg:
         flag_error = True
@@ -185,8 +186,6 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
     except Exception as err_msg:
         flag_error = True
         logger.info('STRAP failed with other errors! error msg: {}'.format(err_msg))
-    else:
-        flag_error = False
     finally:
         if not flag_error and _check_file_exist(file_path, flag_directed_graph):
         
