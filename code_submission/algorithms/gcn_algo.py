@@ -292,7 +292,7 @@ class GCNAlgo(GNNAlgo):
                            directed):
         max_hidden_units = max(int(16000000000 / 3 / 4 / (num_nodes+num_edges)), 1)
         if directed:
-            max_hidden_units = int(max_hidden_units/2)
+            max_hidden_units = int(max_hidden_units/3)
         hidden_list = GCNAlgo.hyperparam_space['hidden'].categories
         if max_hidden_units < max(hidden_list):
             new_hidden_list = []
