@@ -2,16 +2,20 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv
+from torch_geometric.utils.dropout import dropout_adj
 from sklearn.metrics import accuracy_score
+from .gnns import DirectedGCNConv
 
 from spaces import Categoric, Numeric
 
-from torch_geometric.utils.dropout import dropout_adj
-import numpy as np
+logger = logging.getLogger('code_submission')
 
 
 # todo (daoyuan) change the GCNConv to DirectedGCNConv
@@ -21,21 +25,26 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0):
+                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False, directed=False):
 
         super(GCN, self).__init__()
-        self.conv1 = GCNConv(features_num, hidden)
+        self.first_lin = Linear(features_num, hidden)
         self.convs = torch.nn.ModuleList()
+        if directed:
+            self.convs.append(DirectedGCNConv(hidden, hidden * 2))
+            hidden = hidden * 2
+        else:
+            self.convs.append(GCNConv(hidden, hidden))
         for i in range(num_layers - 1):
             self.convs.append(GCNConv(hidden, hidden))
         self.lin2 = Linear(hidden, num_class)
-        self.first_lin = Linear(features_num, hidden)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
+        self.use_res = bool(use_res)
+        self.directed = directed
 
     def reset_parameters(self):
         self.first_lin.reset_parameters()
-        self.conv1.reset_parameters()
         for conv in self.convs:
             conv.reset_parameters()
         self.lin2.reset_parameters()
@@ -46,18 +55,45 @@ class GCN(torch.nn.Module):
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
-        x = F.relu(self.first_lin(x))
-        x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-        x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-        x = self.lin2(x)
+
+        if not self.use_res:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            for conv in self.convs:
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+        else:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x_list = [] if self.directed else [x]
+            for conv in self.convs:
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                x_list.append(x)
+            x = torch.sum(torch.stack(x_list, 0), 0)
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+
         # return F.log_softmax(x, dim=-1)
         # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
         return x
 
     def __repr__(self):
         return self.__class__.__name__
+
+    @classmethod
+    def bottleneck_tensor_size(cls,
+                               num_nodes,
+                               num_edges,
+                               n_class,
+                               features_num,
+                               num_layers=2,
+                               hidden=16,
+                               hidden_droprate=0.5,
+                               edge_droprate=0.0):
+        """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
+        # each float/int occupies 4 bytes
+        return 4 * (num_nodes+num_edges) * hidden
 
 
 class FocalLoss(torch.nn.Module):
@@ -67,7 +103,7 @@ class FocalLoss(torch.nn.Module):
         self.device = device
         self.reduction = reduction
         self._EPSILON = 1e-7
-        self.alpha = 0.5  # default alpha for binary classification
+        self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
             self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device)
         else:
@@ -90,14 +126,17 @@ class FocalLoss(torch.nn.Module):
         one_hot_target = torch.zeros([N, C], dtype=torch.float32, device=categorical_y.device)
         one_hot_target.scatter_(1, categorical_y, 1)
 
-        # to avoid zero division
-        input = input + self._EPSILON
         pt = F.softmax(input)
 
-        ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
-        # loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
-        loss_weight = torch.sum(one_hot_target * (torch.pow(1 - pt, self.gamma)).detach() * self.alpha, dim=1)
-        loss = loss_weight * ce_loss
+        # # hard implementation
+        # ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
+        # # loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
+        # loss_weight = torch.sum(one_hot_target * (torch.pow(1 - pt, self.gamma)).detach() * self.alpha, dim=1)
+        # loss = loss_weight * ce_loss
+
+        # soft implementation
+        pt = pt * one_hot_target + (1 - pt) * (1.0 - one_hot_target)
+        loss = -torch.mean(self.alpha * (torch.pow(1 - pt, self.gamma)).detach() * torch.log(pt + 1e-10), dim=1)
 
         if self.reduction == 'none':
             loss = loss
@@ -204,17 +243,20 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(2, 5)), None, 3),
+        num_layers=Categoric(list(range(1, 4)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 32),
         hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
         # edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),
-        edge_droprate=Categoric([0.], None, 0.0),
+        # edge_droprate=Categoric([0.0, 0.15, 0.3, 0.45, 0.6], None, 0.0),
+        edge_droprate=Categoric([0.0], None, 0.0),
+        # edge_droprate=Categoric([0.0, 0.1, 0.2, 0.3], None, 0.0),
         # feature_norm=Categoric(["no_norm", "graph_size_norm"], None, "no_norm"),
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
+        use_res=Categoric([0., 1.], None, 0.)
     )
 
     def __init__(self,
@@ -228,7 +270,10 @@ class GCNAlgo(GNNAlgo):
         self._num_class = num_class
         self.model = GCN(
             num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5), config.get("edge_droprate", 0.0)).to(device)
+            config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+            config.get("edge_droprate", 0.0), config.get("use_res", 0.0),
+            non_hpo_config.get("directed", False)).to(device)
+            # False).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
@@ -236,3 +281,59 @@ class GCNAlgo(GNNAlgo):
         self._features_num = features_num
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
+
+    @classmethod
+    def ensure_memory_safe(cls,
+                           num_nodes,
+                           num_edges,
+                           n_class,
+                           features_num,
+                           directed):
+        max_hidden_units = max(int(16000000000 / 3 / 4 / (num_nodes+num_edges)), 1)
+        if directed:
+            max_hidden_units = int(max_hidden_units/3)
+        hidden_list = GCNAlgo.hyperparam_space['hidden'].categories
+        if max_hidden_units < max(hidden_list):
+            new_hidden_list = []
+            for h in hidden_list:
+                if h <= max_hidden_units:
+                    new_hidden_list.append(h)
+            if len(new_hidden_list) == 0:
+                new_hidden_list = [max_hidden_units]
+            GCNAlgo.hyperparam_space['hidden'].categories = new_hidden_list
+            if GCNAlgo.hyperparam_space['hidden'].default_value not in new_hidden_list:
+                GCNAlgo.hyperparam_space['hidden'].default_value = new_hidden_list[0]
+            return True
+        return False
+
+    @classmethod
+    def is_memory_safe(cls,
+                       num_nodes,
+                       num_edges,
+                       n_class,
+                       features_num,
+                       config,
+                       non_hpo_config=None):
+        """estimate the (gpu/cpu) memory consumption"""
+        num_bytes = GCN.bottleneck_tensor_size(
+                        num_nodes, num_edges, n_class, features_num,
+                        config.get("num_layers", 2), config.get("hidden", 16),
+                        config.get("hidden_droprate", 0.5),
+                        config.get("edge_droprate", 0.0))
+        # very reservative in this way
+        # `MessageParsing` provides an implementation of `propagate()`
+        # where tensors of `bottleneck_tensor_size` are allocated twice during
+        # the lifecycle of this `propagate()`. We consider the worst case
+        # where the first has been allocated and `torch.cuda.cached_memory()`
+        # is just less than `bottleneck_tensor_size`. In this case, torch
+        # tries to request the `bottleneck_tensor_size` additional memory
+        # from cuda. If there is no free memory larger than what required,
+        # OOM would be triggered. In a word, worst case we need three times of
+        # the `bottleneck_tensor_size`. This very ad-hoc estimation serves as
+        # a workaround here.
+        is_safe = 3*num_bytes <= 16000000000
+        if is_safe:
+            logger.debug("=== a safe config {} ===".format(config))
+        else:
+            logger.warn("=== an unsafe config {} ===".format(config))
+        return is_safe

@@ -7,7 +7,6 @@ import time
 
 import torch
 
-
 # from algorithms import GraphSAINTRandomWalkSampler
 from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
 from algorithms.model_selection import select_algo_from_data
@@ -18,7 +17,6 @@ from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import *
 from torch_geometric.data import DataLoader
-
 
 logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
@@ -126,7 +124,9 @@ class Model(object):
         logger.info("remaining {}s after data preparation".format(self._scheduler.get_remaining_time()))
 
         self.non_hpo_config["label_alpha"] = label_weights
-        logger.info("The graph is {}directed graph".format("un-" if data.is_undirected() else ""))
+        is_undirected = data.is_undirected()
+        non_hpo_config["directed"] = not is_undirected
+        logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
         suiable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
         self.non_hpo_config = suitable_non_hpo_config
@@ -136,6 +136,15 @@ class Model(object):
             self.change_algo(suiable_algo, remain_time_budget)
             ALGO = suiable_algo
         # loader = DataLoader(data, batch_size=32, shuffle=True)
+
+        change_hyper_space = ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0],
+                                                     n_class, data.x.size()[1], not is_undirected)
+        if change_hyper_space:
+            self._hyperparam_space = ALGO.hyperparam_space
+            logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
+            remain_time_budget = self._scheduler.get_remaining_time()
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler.setup_timer(remain_time_budget)
 
         algo = None
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
@@ -150,10 +159,10 @@ class Model(object):
                         test_results = algo.pred(data, make_decision=False)
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
+                    torch.cuda.empty_cache()
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
-
                 if config:
                     if FIX_FOCAL_LOSS:
                         self.non_hpo_config["label_alpha"] = label_weights
@@ -172,6 +181,8 @@ class Model(object):
             if SAVE_TEST_RESULTS:
                 test_results = algo.pred(data, make_decision=False)
             self._scheduler.record(algo, valid_info, test_results)
+            algo = None
+            torch.cuda.empty_cache()
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
         pred = self._scheduler.pred(
