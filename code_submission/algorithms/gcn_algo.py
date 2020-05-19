@@ -103,7 +103,7 @@ class FocalLoss(torch.nn.Module):
         self.device = device
         self.reduction = reduction
         self._EPSILON = 1e-7
-        self.alpha = 0.5  # default alpha for binary classification
+        self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
             self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device)
         else:
@@ -126,14 +126,18 @@ class FocalLoss(torch.nn.Module):
         one_hot_target = torch.zeros([N, C], dtype=torch.float32, device=categorical_y.device)
         one_hot_target.scatter_(1, categorical_y, 1)
 
-        # to avoid zero division
-        input = input + self._EPSILON
+        input = input
         pt = F.softmax(input)
 
-        ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
-        # loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
-        loss_weight = torch.sum(one_hot_target * (torch.pow(1 - pt, self.gamma)).detach() * self.alpha, dim=1)
-        loss = loss_weight * ce_loss
+        # # hard implementation
+        # ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
+        # # loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
+        # loss_weight = torch.sum(one_hot_target * (torch.pow(1 - pt, self.gamma)).detach() * self.alpha, dim=1)
+        # loss = loss_weight * ce_loss
+
+        # soft implementation
+        pt = pt * one_hot_target + (1 - pt) * (1.0 - one_hot_target)
+        loss = -torch.mean(self.alpha * (torch.pow(1 - pt, self.gamma)).detach() * torch.log(pt + 1e-10), dim=1)
 
         if self.reduction == 'none':
             loss = loss
