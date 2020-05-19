@@ -88,7 +88,8 @@ class SplineGCNAlgo(GNNAlgo):
                        num_nodes,
                        num_edges,
                        n_class,
-                       features_num):
+                       features_num,
+					   directed):
         # (daoyuan) TO DO: implement
         pass
 

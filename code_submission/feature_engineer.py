@@ -179,33 +179,35 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
                         '0.5 12', str(STRAP_epsilon), '8', str(dims)])
         cmd_return = subprocess.run(run_commands, shell=True, timeout=timeout)
         #logger.info('chomod commands return: {}'.format(proc.returncode))
-        flag_timeout = False
     except subprocess.TimeoutExpired as timeout_msg:
-        flag_timeout = True 
-        logger.info('STRAP timeout! error msg: {}'.format(timeout_msg))
-
-    if not flag_timeout and _check_file_exist(file_path, flag_directed_graph):
-        flag_error = False
-        
-        if flag_directed_graph:
-            node_embed_u = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_U.csv'), header=None)
-            if node_embed_u.isnull().values.any():
-                node_embed_u.fillna(0.0)
-                logger.info('find nan in node_embed_U')
-            node_embed_v = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_V.csv'), header=None)
-            if node_embed_v.isnull().values.any():
-                node_embed_v.fillna(0.0)
-                logger.warn('find nan in node_embed_V')
-            node_embed = np.concatenate([node_embed_u, node_embed_v], axis=1)
-        else:
-            node_embed = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_u_U.csv'), header=None)
-            if node_embed.isnull().values.any():
-                node_embed_u.fillna(0.0)
-                logger.warn('find nan in node_embed_U')
-    else:
-        logger.warn('Error: no such file!')
         flag_error = True
-        node_embed = []
+        logger.info('STRAP timeout! error msg: {}'.format(timeout_msg))
+    except Exception as err_msg:
+        flag_error = True
+        logger.info('STRAP failed with other errors! error msg: {}'.format(err_msg))
+    else:
+        flag_error = False
+    finally:
+        if not flag_error and _check_file_exist(file_path, flag_directed_graph):
+        
+            if flag_directed_graph:
+                node_embed_u = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_U.csv'), header=None)
+                if node_embed_u.isnull().values.any():
+                    node_embed_u.fillna(0.0)
+                    logger.info('find nan in node_embed_U')
+                node_embed_v = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_d_V.csv'), header=None)
+                if node_embed_v.isnull().values.any():
+                    node_embed_v.fillna(0.0)
+                    logger.warn('find nan in node_embed_V')
+                node_embed = np.concatenate([node_embed_u, node_embed_v], axis=1)
+            else:
+                node_embed = pd.read_csv(os.path.join(file_path, 'NR_EB/STRAP_strap_frpca_u_U.csv'), header=None)
+                if node_embed.isnull().values.any():
+                    node_embed_u.fillna(0.0)
+                    logger.warn('find nan in node_embed_U')
+        else:
+            logger.warn('Error: no such file!')
+            node_embed = []
     
     return flag_error, node_embed
     

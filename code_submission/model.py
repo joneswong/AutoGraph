@@ -112,7 +112,7 @@ class Model(object):
         label_weights = get_label_weights(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data, n_class).to(self.device)
+            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
 
