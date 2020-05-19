@@ -64,7 +64,7 @@ def run_STRAP(num_nodes, edges, flag_directed_graph, epsilon=1e6, dims=128):
     #write edge file
     num_edges = len(edges)
     if num_edges > epsilon:
-        STRAP_epsilon = 5e-3
+        STRAP_epsilon = 5e-4
     else:
         STRAP_epsilon = 1e-4
 

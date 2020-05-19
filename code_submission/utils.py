@@ -91,8 +91,14 @@ def get_label_weights(train_label, n_class):
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
     inversed_counts = 1.0 / counts
+    # is_major = (counts > 100).astype(float)
+    # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
     normalize_factor = inversed_counts.sum()
     inversed_counts = inversed_counts / normalize_factor
+
+    T = 1.0
+    inversed_counts = np.power(inversed_counts, T)
+
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
 

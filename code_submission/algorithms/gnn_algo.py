@@ -83,6 +83,15 @@ class SplineGCNAlgo(GNNAlgo):
         # (daoyuan) TO DO: implement
         return True
 
+    @classmethod
+    def ensure_memory_safe(cls,
+                       num_nodes,
+                       num_edges,
+                       n_class,
+                       features_num):
+        # (daoyuan) TO DO: implement
+        pass
+
 
 class SplineGCN_APPNPAlgo(GNNAlgo):
     hyperparam_space = dict(

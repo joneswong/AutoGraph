@@ -45,6 +45,9 @@ class Ensembler(object):
 
         logger.info("to select config(s) from {} candidates".format(len(results)))
         sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
+        self.train_over_all_data = (len(sorted_results) == 1 and sorted_results[0][3] < 200)
+        # for item in sorted_results:
+        #     print(item)
         if self._config_selection == 'greedy':
             # choose the best one
             optimal = sorted_results[-1]
@@ -159,24 +162,32 @@ class Ensembler(object):
 
     def cv_ensembler(self, opt_records, data, device, n_class, num_features, scheduler, algo, learn_from_scratch, non_hpo_config):
         opt_record = opt_records[0]
+        if self.train_over_all_data:
+            global CV_NUM_FOLD
+            CV_NUM_FOLD = 1
         parts = divide_data(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device)
         part_logits = list()
         cur_valid_part_idx = 0
-        while (not scheduler.should_stop(SAFE_FRAC)) and (cur_valid_part_idx < CV_NUM_FOLD):
+        while (not scheduler.should_stop(SAFE_FRAC)): # and (cur_valid_part_idx < CV_NUM_FOLD):
+            torch.cuda.empty_cache()
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])
-            train_mask = torch.sum(
-                torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
-            valid_mask = parts[cur_valid_part_idx]
+            if not self.train_over_all_data:
+                train_mask = torch.sum(torch.stack([m for i, m in enumerate(parts) if i != cur_valid_part_idx]), 0).type(torch.bool)
+                valid_mask = parts[cur_valid_part_idx]
+            else:
+                train_mask = parts[0]
+                valid_mask = parts[0]
             self._ensembler_early_stopper.reset()
             while not scheduler.should_stop(SAFE_FRAC):
                 train_info = model.train(data, train_mask)
                 valid_info = model.valid(data, valid_mask)
-                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
+                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) or self.train_over_all_data:
                     logits = model.pred(data, make_decision=False)
                     part_logits.append(logits.cpu().numpy())
-                    break
+                    if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
+                        break
             if FINE_TUNE_WHEN_CV:
                 # naive version: enhance the model by train with the valid/whole data part
                 i = 0
@@ -187,8 +198,9 @@ class Ensembler(object):
                     model.train(data, data.train_mask)  # fine-tune on the whole data
                     i += 1
                 logger.info("Fine-tune when cv, fine tune epoch: {}/{}".format(i, FINE_TUNE_EPOCH))
-            cur_valid_part_idx += 1
-            
+            cur_valid_part_idx = (cur_valid_part_idx + 1) % CV_NUM_FOLD
+            if cur_valid_part_idx == 0:
+                parts = divide_data(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device)
         if len(part_logits) == 0:
             logger.warn("have not completed even one training course")
             logits = model.pred(data, make_decision=False)
@@ -198,48 +210,50 @@ class Ensembler(object):
         return preds
 
     def naive_ensembler(self, opt_records, data, device, n_class, num_features, scheduler, algo, learn_from_scratch, non_hpo_config, train_y):
-        if len(opt_records) == 1:
-            # just train a model with the optimal config on the whole labeled samples
+        if self.train_over_all_data:
+            # limited time for training even one model
             pass
         else:
             # besides of the diversity of inductive biases, we also
             # exploit the diversity of their training data
-            parts = divide_data_label_wise(
-                data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
+            parts = divide_data_label_wise(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
         preds = list()
         config_weights = list()
         finetuned_model_weights = list()
-        for i, opt_record in enumerate(opt_records):
+        cur_index = 0
+        while not scheduler.should_stop(SAFE_FRAC):
             torch.cuda.empty_cache()
+            opt_record = opt_records[cur_index % len(opt_records)]
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])
-            if len(opt_records) == 1:
+            if self.train_over_all_data:
                 train_mask = data.train_mask
-                valid_mask = None
+                valid_mask = data.train_mask
             else:
                 train_mask = torch.sum(
-                    torch.stack([m for j, m in enumerate(parts) if j != (i % CV_NUM_FOLD)]), 0).type(torch.bool)
-                valid_mask = parts[i % CV_NUM_FOLD]
+                    torch.stack([m for j, m in enumerate(parts) if j != (cur_index % CV_NUM_FOLD)]), 0).type(torch.bool)
+                valid_mask = parts[cur_index % CV_NUM_FOLD]
             self._ensembler_early_stopper.reset()
             while not scheduler.should_stop(SAFE_FRAC):
                 train_info = model.train(data, train_mask)
-                if valid_mask is not None:
-                    valid_info = model.valid(data, valid_mask)
-                else:
-                    # currently, this only cooperates with fixed #epochs
-                    valid_info = None
-                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) and \
-                        (not learn_from_scratch or self._ensembler_early_stopper.get_cur_step() >= opt_record[3]):
+                valid_info = model.valid(data, valid_mask)
+                if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) or self.train_over_all_data:
                     activation = model.pred(data, make_decision=False)
                     pr = F.softmax(activation)
                     preds.append(pr)
                     config_weights.append(opt_record[2]['accuracy'])
-                    if valid_info is not None:
-                        finetuned_model_weights.append(valid_info['accuracy'])
-                    break
+                    finetuned_model_weights.append(valid_info['accuracy'])
+                    if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
+                        break
             logger.info("the {}-th final model traverses the whole \
-                         training data for {} epochs".format(i, self._ensembler_early_stopper.get_cur_step()))
+                         training data for {} epochs".format(cur_index, self._ensembler_early_stopper.get_cur_step()))
+            cur_index = cur_index + 1
+            if cur_index % CV_NUM_FOLD == 0:
+                if len(opt_records) == 1:
+                    pass
+                else:
+                    parts = divide_data_label_wise(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
         if len(preds) == 0:
             logger.warn("have not completed even one training course")
             activation = model.pred(data, make_decision=False)
