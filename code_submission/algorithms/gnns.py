@@ -18,18 +18,12 @@ from torch_geometric.utils.dropout import dropout_adj
 # class AdaGCNConv(GCNConv):
 
 
-def glorot(tensor):
-    if tensor is not None:
-        stdv = math.sqrt(6.0 / (tensor.size(-2) + tensor.size(-1)))
-        tensor.data.uniform_(-stdv, stdv)
-
-
 class DirectedGCNConv(GCNConv):
     def __init__(self, in_channels, out_channels, improved=False, cached=False,
                  bias=True, **kwargs):
         super(DirectedGCNConv, self).__init__(in_channels, out_channels, improved, cached, bias, **kwargs)
         self.weight = torch.nn.Parameter(torch.Tensor(in_channels, int(out_channels / 2)))  # 2 is due to hidden concat
-        glorot(self.weight)
+        torch.nn.init.xavier_uniform_(self.weight, gain=1)
 
     @staticmethod
     def norm(edge_index, num_nodes, edge_weight=None, improved=False,
