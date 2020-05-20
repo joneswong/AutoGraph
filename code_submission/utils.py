@@ -64,6 +64,9 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
     if x.shape[1] != 1:
         #remove raw node_index 
         x = x[:,1:]
+    else:
+        #one hot encoder of node_index (backup plan)
+        x = np.eye(num_nodes)
 
     logger.info('x.shape after feature engineering: {}'.format(x.shape))
     x = torch.tensor(x, dtype=torch.float)
