@@ -104,17 +104,25 @@ class Model(object):
         file_path = os.path.dirname(__file__) + '/cnpy_file'
         file_name = ['libcnpy.so', 'libcnpy.a', 'cnpy.h', 'mat2npz', 'npy2mat', 'npz2mat']
         file_name = [os.path.join(file_path, each_file_name) for each_file_name in file_name]
+        
+        for each_file in file_name:
+            run_commands = ' '.join(['chmod','u+x',each_file])
+            cmd_return = subprocess.run(run_commands, shell=True)
 
         run_commands = ' '.join(['cp', file_name[0], file_name[1], '/usr/local/lib/'])
         cmd_return = subprocess.run(run_commands, shell=True)
+        print(cmd_return.returncode)
 
         run_commands = ' '.join(['cp', file_name[2], '/usr/local/include/'])
         cmd_return = subprocess.run(run_commands, shell=True)
+        print(cmd_return.returncode)
 
         run_commands = ' '.join(['cp', file_name[3], file_name[4], file_name[5], '/usr/local/bin/'])
         cmd_return = subprocess.run(run_commands, shell=True)
+        print(cmd_return.returncode)
         
         os.environ['LD_LIBRARY_PATH'] = '%s:%s'%('$LD_LIBRARY_PATH','/usr/local/lib')
+        print(cmd_return.returncode)
         
 
     def change_algo(self, ALGO, remain_time_budget):
