@@ -186,6 +186,7 @@ def divide_data(data, split_rates, device):
         masks.append(part_masks.to(device))
     return tuple(masks)
 
+
 def calculate_config_dist(tpa, tpb):
     """Trivially calculate the distance of two configs"""
 
@@ -232,3 +233,17 @@ def divide_data_label_wise(data, split_rates, device, n_class, train_y):
         part_masks[all_indices[i]] = 1
         masks.append(part_masks.to(device))
     return tuple(masks)
+
+
+def is_imbalanced_task(train_label, n_class):
+    unique, counts = np.unique(train_label, return_counts=True)
+    if not len(counts) == n_class:
+        raise ValueError("Your train_label has different label size to the meta_n_class")
+
+    logger.info(str(' '.join([str(i) for i in list(unique)])))
+    logger.info(str(' '.join([str(i) for i in list(counts)])))
+
+    if np.max(counts) >= (0.8 * np.sum(counts)):
+        return True, (counts < np.max(counts)).astype(np.float)
+    else:
+        return False, None
