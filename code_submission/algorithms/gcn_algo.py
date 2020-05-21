@@ -12,6 +12,8 @@ from torch_geometric.nn import GCNConv
 from torch_geometric.utils.dropout import dropout_adj
 from sklearn.metrics import accuracy_score
 from .gnns import DirectedGCNConv
+from dgl.nn.pytorch.conv import GraphConv
+import dgl
 
 from spaces import Categoric, Numeric
 
@@ -94,6 +96,95 @@ class GCN(torch.nn.Module):
         """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
         # each float/int occupies 4 bytes
         return 4 * (num_nodes+num_edges) * hidden
+
+
+class DGLGCN(torch.nn.Module):
+    def __init__(self,
+                 num_class,
+                 features_num,
+                 num_layers=2,
+                 hidden=16,
+                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False, directed=False):
+
+        super(DGLGCN, self).__init__()
+        self.first_lin = Linear(features_num, hidden)
+        self.convs = torch.nn.ModuleList()
+        if directed:
+            # todo, implement the directedGCN for DGL
+            self.convs.append(GraphConv(hidden, hidden * 2))
+            hidden = hidden * 2
+        else:
+            self.convs.append(GraphConv(hidden, hidden))
+        for i in range(num_layers - 1):
+            self.convs.append(GraphConv(hidden, hidden))
+        self.lin2 = Linear(hidden, num_class)
+        self.hidden_droprate = hidden_droprate
+        self.edge_droprate = edge_droprate
+        self.use_res = bool(use_res)
+        self.directed = directed
+        self.g = dgl.DGLGraph()
+
+    def reset_parameters(self):
+        self.first_lin.reset_parameters()
+        for conv in self.convs:
+            conv.reset_parameters()
+        self.lin2.reset_parameters()
+
+    def forward(self, data):
+        if self.edge_droprate != 0.0:
+            x = data.x
+            edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
+            self.g.clear()
+            self.g.add_nodes(data.num_nodes)
+            self.g.add_edges(edge_index[0], edge_index[1])
+            self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+        else:
+            x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
+            if len(self.g) == 0:  # first forward, build the graph once
+                self.g.add_nodes(data.num_nodes)
+                self.g.add_edges(edge_index[0], edge_index[1])
+                self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+
+        # todo (daoyuan) use edge_weight in the GCN norm process
+        if not self.use_res:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            for conv in self.convs:
+                x = F.relu(conv(self.g, x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+        else:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x_list = [] if self.directed else [x]
+            for conv in self.convs:
+                x = F.relu(conv(self.g, x))
+                x_list.append(x)
+            x = torch.sum(torch.stack(x_list, 0), 0)
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
+        return x
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+    @classmethod
+    def bottleneck_tensor_size(cls,
+                               num_nodes,
+                               num_edges,
+                               n_class,
+                               features_num,
+                               num_layers=2,
+                               hidden=16,
+                               hidden_droprate=0.5,
+                               edge_droprate=0.0):
+        """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
+        # each float/int occupies 4 bytes
+        return 4 * (num_nodes+num_edges) * hidden
+
 
 
 class FocalLoss(torch.nn.Module):
@@ -268,7 +359,7 @@ class GCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
-        self.model = GCN(
+        self.model = DGLGCN(
             num_class, features_num, config.get("num_layers", 2),
             config.get("hidden", 16), config.get("hidden_droprate", 0.5),
             config.get("edge_droprate", 0.0), config.get("use_res", 0.0),

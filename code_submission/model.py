@@ -149,13 +149,13 @@ class Model(object):
         non_hpo_config["directed"] = not is_undirected
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
-        suiable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
+        suitable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
         self.non_hpo_config = suitable_non_hpo_config
         global ALGO
-        if suiable_algo != ALGO:
-            remain_time_budget = self._scheduler.get_remaining_time()
-            self.change_algo(suiable_algo, remain_time_budget)
-            ALGO = suiable_algo
+        # if suitable_algo != ALGO:
+        #     remain_time_budget = self._scheduler.get_remaining_time()
+        #     self.change_algo(suitable_algo, remain_time_budget)
+        #     ALGO = suitable_algo
         # loader = DataLoader(data, batch_size=32, shuffle=True)
 
         change_hyper_space = ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0],
