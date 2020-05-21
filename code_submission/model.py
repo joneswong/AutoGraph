@@ -17,6 +17,8 @@ from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import *
 from torch_geometric.data import DataLoader
+import subprocess
+import os
 
 logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
@@ -96,6 +98,25 @@ class Model(object):
         logger.info('Ensembler: %s', type(self.ensembler).__name__)
         logger.info('Learn from scratch in ensembler: %s', non_hpo_config["LEARN_FROM_SCRATCH"])
 
+        self.cp_cnpy_file()
+
+    def cp_cnpy_file(self):
+        file_path = os.path.dirname(__file__) + '/cnpy_file'
+        file_name = ['libcnpy.so', 'libcnpy.a', 'cnpy.h', 'mat2npz', 'npy2mat', 'npz2mat']
+        file_name = [os.path.join(file_path, each_file_name) for each_file_name in file_name]
+        
+        run_commands = ' '.join(['cp', file_name[0], file_name[1], '/usr/local/lib/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+
+        run_commands = ' '.join(['cp', file_name[2], '/usr/local/include/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+
+        run_commands = ' '.join(['cp', file_name[3], file_name[4], file_name[5], '/usr/local/bin/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+        
+        os.environ['LD_LIBRARY_PATH'] = '%s:%s'%('$LD_LIBRARY_PATH','/usr/local/lib')
+        
+
     def change_algo(self, ALGO, remain_time_budget):
         self._hyperparam_space = ALGO.hyperparam_space
         logger.info('Change to algo: %s', ALGO)
@@ -112,7 +133,7 @@ class Model(object):
         label_weights = get_label_weights(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data, n_class).to(self.device)
+            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
 
