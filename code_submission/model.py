@@ -130,7 +130,6 @@ class Model(object):
             data = generate_pyg_data_without_transform(data).to(self.device)
 
         self.non_hpo_config["label_alpha"] = label_weights
-        print('\n', label_weights, '\n')
         is_undirected = data.is_undirected()
         self.non_hpo_config["directed"] = not is_undirected and CONSIDER_DIRECTED_GCN
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))

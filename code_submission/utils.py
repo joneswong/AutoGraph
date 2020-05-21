@@ -247,9 +247,6 @@ def is_imbalanced_task(train_label, n_class):
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
 
-    logger.info(str(' '.join([str(i) for i in list(unique)])))
-    logger.info(str(' '.join([str(i) for i in list(counts)])))
-
     if np.max(counts) >= (0.8 * np.sum(counts)):
         return True, (counts < np.max(counts)).astype(np.float)
     else:

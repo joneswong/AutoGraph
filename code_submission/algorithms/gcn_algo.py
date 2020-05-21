@@ -107,7 +107,6 @@ class FocalLoss(torch.nn.Module):
         self.device = device
         self.reduction = reduction
         self.is_minority = torch.tensor(is_minority, dtype=torch.float32, device=device).view(1, -1) if is_minority is not None else None
-        print(self.is_minority)
         self._EPSILON = 1e-7
         self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):

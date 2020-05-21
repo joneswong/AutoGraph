@@ -30,7 +30,6 @@ class AdaptiveWeightStopper(Stopper):
         super(AdaptiveWeightStopper, self).__init__()
 
     def should_early_stop(self, train_info, valid_info):
-        print('%.2f' % self._cur_T, train_info, valid_info)
         self._cur_step += 1
         cur_performance = valid_info['accuracy']
         self._performance_list.append(cur_performance)
