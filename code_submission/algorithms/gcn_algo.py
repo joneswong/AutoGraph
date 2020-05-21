@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import logging
 
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -27,7 +28,7 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, use_res=False, directed=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False):
 
         super(GCN, self).__init__()
         self.first_lin = Linear(features_num, hidden)
@@ -42,7 +43,7 @@ class GCN(torch.nn.Module):
         self.lin2 = Linear(hidden, num_class)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
-        self.use_res = bool(use_res)
+        self.res_type = res_type
         self.directed = directed
 
     def reset_parameters(self):
@@ -58,7 +59,7 @@ class GCN(torch.nn.Module):
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
 
-        if not self.use_res:
+        if self.res_type == 0.0:
             x = F.relu(self.first_lin(x))
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             for conv in self.convs:
@@ -72,7 +73,10 @@ class GCN(torch.nn.Module):
             for conv in self.convs:
                 x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
                 x_list.append(x)
-            x = torch.sum(torch.stack(x_list, 0), 0)
+            if self.res_type == 1.0:
+                x = x + x_list[0]
+            elif self.res_type == 2.0:
+                x = torch.sum(torch.stack(x_list, 0), 0)
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             x = self.lin2(x)
 
@@ -188,19 +192,20 @@ class DGLGCN(torch.nn.Module):
 
 
 class FocalLoss(torch.nn.Module):
-    def __init__(self, gamma=2, alpha=0.5, device=torch.device('cpu'), reduction="mean"):
+    def __init__(self, gamma=2, alpha=0.5, device=torch.device('cpu'), reduction="mean", is_minority=None):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.device = device
         self.reduction = reduction
+        self.is_minority = torch.tensor(is_minority, dtype=torch.float32, device=device).view(1, -1) if is_minority is not None else None
         self._EPSILON = 1e-7
         self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
-            self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device)
+            self.alpha = torch.tensor(self.alpha, dtype=torch.float32, device=device).view(1, -1)
         else:
             raise ValueError("Your alpha should be a weight list with shape 1 * n, n is the label number.")
 
-    def forward(self, input, target):
+    def forward(self, input, target, T=1.0):
         """
         :param input: shape N * C
         :param target: shape N, categorical_target format
@@ -217,17 +222,27 @@ class FocalLoss(torch.nn.Module):
         one_hot_target = torch.zeros([N, C], dtype=torch.float32, device=categorical_y.device)
         one_hot_target.scatter_(1, categorical_y, 1)
 
-        pt = F.softmax(input)
+        preds = F.softmax(input)
+        pt = preds * one_hot_target + (1.0 - preds) * (1.0 - one_hot_target)
 
-        # # hard implementation
-        # ce_loss = torch.nn.CrossEntropyLoss(reduction="none")(input, target)
-        # # loss_weight = torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma) * self.alpha, dim=1)
-        # loss_weight = torch.sum(one_hot_target * (torch.pow(1 - pt, self.gamma)).detach() * self.alpha, dim=1)
-        # loss = loss_weight * ce_loss
+        if self.is_minority is not None:
+            # soft implementation
+            # loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
-        # soft implementation
-        pt = pt * one_hot_target + (1 - pt) * (1.0 - one_hot_target)
-        loss = -torch.mean(self.alpha * (torch.pow(1 - pt, self.gamma)).detach() * torch.log(pt + 1e-10), dim=1)
+            # hard implementation
+            loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+
+            weight = torch.sum((self.is_minority * T + (1.0 - self.is_minority)) * one_hot_target, dim=1)
+            loss = weight * loss
+        else:
+            # soft implementation
+            # loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+
+            # hard implementation
+            loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+
+            weight = torch.sum(one_hot_target * self.alpha, dim=1)
+            loss = weight * loss
 
         if self.reduction == 'none':
             loss = loss
@@ -278,11 +293,11 @@ class GNNAlgo(object):
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
-    def train(self, data, data_mask):
+    def train(self, data, data_mask, T = 1.0):
         self.model.train()
         self._optimizer.zero_grad()
         if self.loss_type == "focal_loss":
-            loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask])
+            loss = self.fl_loss(self.model(data)[data_mask], data.y[data_mask], T)
         elif self.loss_type == "ce_loss":
             loss = F.cross_entropy(self.model(data)[data_mask], data.y[data_mask])
         else:
@@ -347,7 +362,7 @@ class GCNAlgo(GNNAlgo):
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
-        use_res=Categoric([0., 1.], None, 0.)
+        res_type=Categoric([0., 1., 2.0], None, 0.)
     )
 
     def __init__(self,
@@ -362,7 +377,7 @@ class GCNAlgo(GNNAlgo):
         self.model = DGLGCN(
             num_class, features_num, config.get("num_layers", 2),
             config.get("hidden", 16), config.get("hidden_droprate", 0.5),
-            config.get("edge_droprate", 0.0), config.get("use_res", 0.0),
+            config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
             non_hpo_config.get("directed", False)).to(device)
             # False).to(device)
         self._optimizer = torch.optim.Adam(
@@ -371,7 +386,7 @@ class GCNAlgo(GNNAlgo):
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
         self.loss_type = config.get("loss_type", "focal_loss")
-        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
+        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device, is_minority=non_hpo_config.get("is_minority", None))
 
     @classmethod
     def ensure_memory_safe(cls,
