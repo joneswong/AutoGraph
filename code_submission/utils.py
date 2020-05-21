@@ -11,7 +11,8 @@ import pandas as pd
 import torch
 from torch_geometric.data import Data
 from feature_engineer import dim_reduction, feature_generation
-from torch_geometric.utils import degree
+from torch_geometric.utils import degree, is_undirected
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger('code_submission')
 
@@ -24,7 +25,7 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_generation=False):
+def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_feature_generation=True):
     x = data['fea_table']
 
     df = data['edge_file']
@@ -43,26 +44,36 @@ def generate_pyg_data(data, n_class, use_dim_reduction=False, use_feature_genera
 
     train_indices = data['train_indices']
     test_indices = data['test_indices']
+    
+
+    flag_directed_graph = not is_undirected(edge_index)
 
     ###   feature engineering  ###
-    non_feature = False
+    flag_none_feature = False
     if use_dim_reduction:
-        x, non_feature = dim_reduction(x)
+        x, flag_none_feature = dim_reduction(x)
     else:
-        if x.shape[1] == 1:
-            x = x.to_numpy()
-            x = x.reshape(x.shape[0])
-            x = np.array(pd.get_dummies(x))
-            non_feature = True
-        else:
-            x = x.drop('node_index', axis=1).to_numpy()
-
+        x = x.to_numpy()
+        flag_none_feature = (x.shape[1] == 1)
+    
     if use_feature_generation:
-        added_features = feature_generation(x, y, n_class, edge_index, non_feature)
-        x = np.concatenate([x]+added_features, axis=1)
+        added_features = feature_generation(x, y, n_class, edge_index, edge_weight,  flag_none_feature, flag_directed_graph, time_budget)
+        if added_features:
+            x = np.concatenate([x]+added_features, axis=1)
 
+    if x.shape[1] != 1:
+        #remove raw node_index 
+        x = x[:,1:]
+    else:
+        #one hot encoder of node_index (backup plan)
+        x = np.eye(num_nodes)
+
+    logger.info('x.shape after feature engineering: {}'.format(x.shape))
     x = torch.tensor(x, dtype=torch.float)
 
+    non_zero_index = torch.nonzero(edge_weight).reshape(-1)
+    edge_weight = edge_weight[non_zero_index]
+    edge_index = edge_index[:,non_zero_index]
     data = Data(x=x, edge_index=edge_index, y=y, edge_weight=edge_weight)
 
     data.num_nodes = num_nodes
@@ -87,8 +98,14 @@ def get_label_weights(train_label, n_class):
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
     inversed_counts = 1.0 / counts
+    # is_major = (counts > 100).astype(float)
+    # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
     normalize_factor = inversed_counts.sum()
     inversed_counts = inversed_counts / normalize_factor
+
+    T = 1.0
+    inversed_counts = np.power(inversed_counts, T)
+
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
 
@@ -175,6 +192,16 @@ def divide_data(data, split_rates, device):
         part_masks[all_indices[i]] = 1
         masks.append(part_masks.to(device))
     return tuple(masks)
+
+def calculate_config_dist(tpa, tpb):
+    """Trivially calculate the distance of two configs"""
+
+    ca, cb = tpa[0], tpb[0]
+    num_diff_field = 0
+    for k in ca:
+        if ca[k] != cb[k]:
+            num_diff_field += 1
+    return num_diff_field
 
 
 def divide_data_label_wise(data, split_rates, n_class, train_y):

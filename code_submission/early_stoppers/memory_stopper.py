@@ -11,12 +11,12 @@ from utils import get_performance
 logger = logging.getLogger('code_submission')
 
 # current implementation: run WINDOW_SIZE steps at least
-WINDOW_SIZE = 10
+WINDOW_SIZE = 20
 
 
 class MemoryStopper(Stopper):
 
-    def __init__(self, min_step=40, max_step=400):
+    def __init__(self, min_step=30, max_step=500):
         self._min_step = max(min_step, WINDOW_SIZE)
         self._max_step = max_step
 
@@ -29,7 +29,8 @@ class MemoryStopper(Stopper):
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
-        performance = get_performance(valid_info)
+        # performance = get_performance(valid_info)
+        performance = -valid_info['loss']
         self.performance_windows[self.index] = performance
         self.index = (self.index + 1) % WINDOW_SIZE
 

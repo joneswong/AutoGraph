@@ -47,7 +47,7 @@ def _clean(starting_kit_dir):
     remove_dir(score_dir)
 
 
-def run(dataset_dir, code_dir):
+def run(dataset_dir, code_dir, seed):
     """run"""
     # Current directory containing this script
     starting_kit_dir = _here()
@@ -59,7 +59,8 @@ def run(dataset_dir, code_dir):
         'python '
         #  f'{path_ingestion} --dataset_dir={dataset_dir}/data '
         f'{path_ingestion} --dataset_dir={dataset_dir}/train.data'
-        f' --code_dir={code_dir}')
+        f' --code_dir={code_dir}'
+        f' --seed={seed}')
 
     command_scoring = (
         #  f'python {path_scoring} --solution_dir={dataset_dir}/solution')
@@ -95,6 +96,10 @@ def _parse_args():
                         help="Directory storing the submission code "
                              "`model.py` and other necessary packages.")
 
+    parser.add_argument('--seed', type=int,
+                        default=1234,
+                        help="seed used for all packages")
+
     args = parser.parse_args()
     return args
 
@@ -104,12 +109,14 @@ def main():
     args = _parse_args()
     dataset_dir = args.dataset_dir
     code_dir = args.code_dir
+    seed = args.seed
     logging.info("#" * 50)
     logging.info("Begin running local test using")
     logging.info(f"code_dir = {code_dir}")
     logging.info(f"dataset_dir = {dataset_dir}")
+    logging.info(f"seed = {seed}")
     logging.info("#" * 50)
-    run(dataset_dir, code_dir)
+    run(dataset_dir, code_dir, seed)
 
 
 if __name__ == '__main__':

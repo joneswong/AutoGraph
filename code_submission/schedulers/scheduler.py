@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
+import torch
 import time
 import copy
 
@@ -61,13 +62,16 @@ class Scheduler(object):
             train_info, early_stop_valid_info)
         return should_early_stop
 
-    def record(self, algo, valid_info):
+    def record(self, algo, valid_info, test_results=None):
         """record (config, ckpt_path, valid_info, #epochs) for a trial"""
 
-        path = "team_common_hpo_{}.pt".format(len(self._results))
-        algo.save_model(path)
-        self._results.append(
-            (copy.deepcopy(self._cur_config), path, valid_info, self._early_stopper.get_cur_step()))
+        model_path = "team_common_hpo_{}.pt".format(len(self._results))
+        algo.save_model(model_path)
+        test_results_path = ''
+        if test_results is not None:
+            test_results_path = "test_results_of_hpo_{}.pt".format(len(self._results))
+            torch.save({'test_results': test_results}, test_results_path)
+        self._results.append((copy.deepcopy(self._cur_config), model_path, valid_info, self._early_stopper.get_cur_step(), test_results_path))
 
     def get_default(self):
         results = dict()
@@ -81,9 +85,9 @@ class Scheduler(object):
                     results[k] = v.default_value
         return results
 
-    def pred(self, n_class, num_features, device, data, algo, learn_from_scratch=False, non_hpo_config=dict()):
+    def pred(self, n_class, num_features, device, data, algo, learn_from_scratch=False, non_hpo_config=dict(), train_y=None):
         considered_configs = self._ensembler.select_configs(self._results)
         predictions = self._ensembler.ensemble(
             n_class, num_features, device, data, self, algo,
-            considered_configs, learn_from_scratch, non_hpo_config)
+            considered_configs, learn_from_scratch, non_hpo_config, train_y)
         return predictions

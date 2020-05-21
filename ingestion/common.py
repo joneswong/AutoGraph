@@ -52,6 +52,6 @@ def import_umodel():
     return model_cls
 
 
-def init_usermodel():
+def init_usermodel(seed=1234):
     """initialize user model"""
-    return import_umodel()()
+    return import_umodel()(seed)

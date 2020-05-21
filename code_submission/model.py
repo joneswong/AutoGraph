@@ -7,7 +7,6 @@ import time
 
 import torch
 
-
 # from algorithms import GraphSAINTRandomWalkSampler
 from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
 from algorithms.model_selection import select_algo_from_data
@@ -17,7 +16,9 @@ from early_stoppers import *
 from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import *
-
+from torch_geometric.data import DataLoader
+import subprocess
+import os
 
 logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
@@ -29,40 +30,40 @@ logger.addHandler(handler)
 logger.propagate = False
 
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
-ALGO = ALGOs[1]
+ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
-HPO_STOPPER = STOPPERs[3]
+HPO_STOPPER = STOPPERs[0]
 ENSEMBLER_STOPPER = STOPPERs[3]
 SCHEDULERs = [GridSearcher, BayesianOptimizer, Scheduler, GeneticOptimizer]
 SCHEDULER = SCHEDULERs[3]
 ENSEMBLER = Ensembler
 FEATURE_ENGINEERING = True
-USE_MINI_BATCH = True
-BATCH_SIZE = 32
-# The number of neighbors to sample (for each layer), int or float (percentage)
-SAMPLE_SIZE_EACH_LAYER = [1.0, 0.5, 0.25, 0.125, 0.125, 0.125, 0.125, 0.125]
 non_hpo_config = dict()
-non_hpo_config["LEARN_FROM_SCRATCH"] = True
+non_hpo_config["LEARN_FROM_SCRATCH"] = False
 # todo (daoyuan) dynamic Frac_for_search, on dataset d, GCN has not completed even one entire training,
 #  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
+DATA_SPLIT_FOR_EACH_TRIAL = True
+SAVE_TEST_RESULTS = True
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
 #                                      num_steps=5, sample_coverage=1000,
-#                                      save_dir=".",
+#                                      save_dir=,
 #                                      num_workers=4)
-
-fix_seed(1234)
 
 
 class Model(object):
 
-    def __init__(self):
+    def __init__(self, seed=time.time()):
         """Constructor
         only `train_predict()` is measured for timing, put as much stuffs
         here as possible
         """
+
+        # convenient for comparing solutions
+        logger.info("seeding with {}".format(seed))
+        fix_seed(int(seed))
 
         self.device = torch.device('cuda:0' if torch.cuda.
                                    is_available() else 'cpu')
@@ -72,18 +73,19 @@ class Model(object):
 
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
-        self.hpo_early_stopper = HPO_STOPPER(max_step=400)
+        self.hpo_early_stopper = HPO_STOPPER(max_step=500)
         self.ensembler_early_stopper = ENSEMBLER_STOPPER()
         # ensemble the promising models searched
+        # self.ensembler = ENSEMBLER(
+        #     early_stopper=self.ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
+        # self.ensembler = ENSEMBLER(
+        #     early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='greedy', training_strategy='cv')
+            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid')
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
         self.non_hpo_config = non_hpo_config
-        non_hpo_config["mini_batch"] = USE_MINI_BATCH
-        non_hpo_config["batch_size"] = BATCH_SIZE
-        non_hpo_config["layer_sample_size"] = SAMPLE_SIZE_EACH_LAYER
 
         logger.info('Device: %s', self.device)
         logger.info('FRAC_FOR_SEARCH: %s', FRAC_FOR_SEARCH)
@@ -95,9 +97,25 @@ class Model(object):
         logger.info('Ensembler_Early_stopper: %s', type(self.ensembler_early_stopper).__name__)
         logger.info('Ensembler: %s', type(self.ensembler).__name__)
         logger.info('Learn from scratch in ensembler: %s', non_hpo_config["LEARN_FROM_SCRATCH"])
-        logger.info('Use mini_batch: %s', non_hpo_config["mini_batch"])
-        logger.info('Batch size: %s', non_hpo_config["batch_size"])
-        logger.info('Sample size of each layer: %s', non_hpo_config["layer_sample_size"])
+
+        self.cp_cnpy_file()
+
+    def cp_cnpy_file(self):
+        file_path = os.path.dirname(__file__) + '/cnpy_file'
+        file_name = ['libcnpy.so', 'libcnpy.a', 'cnpy.h', 'mat2npz', 'npy2mat', 'npz2mat']
+        file_name = [os.path.join(file_path, each_file_name) for each_file_name in file_name]
+        
+        run_commands = ' '.join(['cp', file_name[0], file_name[1], '/usr/local/lib/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+
+        run_commands = ' '.join(['cp', file_name[2], '/usr/local/include/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+
+        run_commands = ' '.join(['cp', file_name[3], file_name[4], file_name[5], '/usr/local/bin/'])
+        cmd_return = subprocess.run(run_commands, shell=True)
+        
+        os.environ['LD_LIBRARY_PATH'] = '%s:%s'%('$LD_LIBRARY_PATH','/usr/local/lib')
+        
 
     def change_algo(self, ALGO, remain_time_budget):
         self._hyperparam_space = ALGO.hyperparam_space
@@ -115,20 +133,16 @@ class Model(object):
         label_weights = get_label_weights(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            # data = generate_pyg_data(data, n_class).to(self.device)
-            # first generate batch on cpu
-            data = generate_pyg_data(data, n_class)
+            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
         else:
-            # data = generate_pyg_data_without_transform(data).to(self.device)
-            # first generate batch on cpu
-            data = generate_pyg_data_without_transform(data)
-        # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
-        train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(data, [7, 1, 2], n_class, train_y)
-        logger.info("remaining {}s after data preparation".format(self._scheduler.get_remaining_time()))
+            data = generate_pyg_data_without_transform(data).to(self.device)
 
-        # transform the two new attributes into tensor, to be compatible to Batch class
-        data.train_indices = torch.tensor(data.train_indices)
-        data.test_indices = torch.tensor(data.test_indices)
+        train_mask, early_valid_mask, final_valid_mask = None, None, None
+        if not DATA_SPLIT_FOR_EACH_TRIAL:
+            # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
+            train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(
+                data, [7, 1, 2], self.device, n_class, train_y)
+        logger.info("remaining {}s after data preparation".format(self._scheduler.get_remaining_time()))
 
         self.non_hpo_config["label_alpha"] = label_weights
         is_undirected = data.is_undirected()
@@ -144,35 +158,58 @@ class Model(object):
             ALGO = suiable_algo
         # loader = DataLoader(data, batch_size=32, shuffle=True)
 
+        change_hyper_space = ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0],
+                                                     n_class, data.x.size()[1], not is_undirected)
+        if change_hyper_space:
+            self._hyperparam_space = ALGO.hyperparam_space
+            logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
+            remain_time_budget = self._scheduler.get_remaining_time()
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler.setup_timer(remain_time_budget)
+
         algo = None
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
             if algo:
                 # within a trial, just continue the training
-                train_info = algo.train(data, train_mask, self.non_hpo_config)
-                early_stop_valid_info = algo.valid(data, early_valid_mask, self.non_hpo_config)
+                train_info = algo.train(data, train_mask)
+                early_stop_valid_info = algo.valid(data, early_valid_mask)
                 if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
-                    valid_info = algo.valid(data, final_valid_mask, self.non_hpo_config)
-                    self._scheduler.record(algo, valid_info)
+                    valid_info = algo.valid(data, final_valid_mask)
+                    test_results = None
+                    if SAVE_TEST_RESULTS:
+                        test_results = algo.pred(data, make_decision=False)
+                    self._scheduler.record(algo, valid_info, test_results)
                     algo = None
+                    torch.cuda.empty_cache()
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
-
                 if config:
                     if FIX_FOCAL_LOSS:
                         self.non_hpo_config["label_alpha"] = label_weights
                         config["loss_type"] = "focal_loss"
                     algo = ALGO(n_class, data.x.size()[1], self.device, config, self.non_hpo_config)
+                    if DATA_SPLIT_FOR_EACH_TRIAL:
+                        # train_mask, early_valid_mask, final_valid_mask = divide_data(data, [7, 1, 2], self.device)
+                        train_mask, early_valid_mask, final_valid_mask = divide_data_label_wise(
+                            data, [7, 1, 2], self.device, n_class, train_y)
                 else:
                     # have exhausted the search space
                     break
         if algo is not None:
-            valid_info = algo.valid(data, final_valid_mask, self.non_hpo_config)
-            self._scheduler.record(algo, valid_info)
+            valid_info = algo.valid(data, final_valid_mask)
+            test_results = None
+            if SAVE_TEST_RESULTS:
+                test_results = algo.pred(data, make_decision=False)
+            self._scheduler.record(algo, valid_info, test_results)
+            algo = None
+            torch.cuda.empty_cache()
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
-        pred = self._scheduler.pred(n_class, data.x.size()[1], self.device, data, ALGO,
-                                    self.non_hpo_config["LEARN_FROM_SCRATCH"], self.non_hpo_config)
+        pred = self._scheduler.pred(
+            n_class, data.x.size()[1], self.device, data, ALGO,
+            self.non_hpo_config["LEARN_FROM_SCRATCH"], self.non_hpo_config,
+            train_y)
         logger.info("remaining {}s after ensemble".format(self._scheduler.get_remaining_time()))
 
         return pred

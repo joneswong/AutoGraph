@@ -30,7 +30,8 @@ class StableStopper(Stopper):
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
-        self.performance_windows[self.index] = get_performance(valid_info)
+        # self.performance_windows[self.index] = get_performance(valid_info)
+        self.performance_windows[self.index] = -valid_info['loss']
         self.index = (self.index + 1) % WINDOW_SIZE
         if self.performance_windows[self.index] is not None and \
                 np.std(self.performance_windows) < STOP_STD:
