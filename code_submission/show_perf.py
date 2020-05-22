@@ -39,7 +39,7 @@ def main():
                 result = trial_reg.search(line)
                 if result:
                     trials.append(float(result.group(1)))
-        assert len(accs) == len(durs) and len(accs) == 5, "Invalid experiment results {} {} of {}-th exp!".format(
+        assert len(accs) == len(durs) and len(accs) == 10, "Invalid experiment results {} {} of {}-th exp!".format(
             len(accs), len(durs), i + 1)
         exp_accs.append(accs)
         exp_durs.append(durs)
@@ -53,21 +53,21 @@ def main():
     std_trials = np.std(exp_trials, 0)
 
     print("====== accuracy ======")
-    print("exp_idx\ta\tb\tc\td\te")
+    print("exp_idx\ta\tb\tc\td\te\tcomputers\tcora_full\togbn-arxiv\tphoto\tpubmed")
     for i in range(len(exp_accs)):
         print('\t'.join([str(i + 1)] + [str(v) for v in exp_accs[i]]))
     print('\t'.join(["mean"] + [str(v) for v in mean_acc]))
     print('\t'.join(["std"] + [str(v) for v in std_acc]))
     print()
     print("====== duration of train_predict() ======")
-    print("exp_idx\ta\tb\tc\td\te")
+    print("exp_idx\ta\tb\tc\td\te\tcomputers\tcora_full\togbn-arxiv\tphoto\tpubmed")
     for i in range(len(exp_durs)):
         print('\t'.join([str(i + 1)] + [str(v) for v in exp_durs[i]]))
     print('\t'.join(["mean"] + [str(v) for v in mean_dur]))
     print('\t'.join(["std"] + [str(v) for v in std_dur]))
     print()
     print("====== trail times of train_predict() ======")
-    print("exp_idx\ta\tb\tc\td\te")
+    print("exp_idx\ta\tb\tc\td\te\tcomputers\tcora_full\togbn-arxiv\tphoto\tpubmed")
     for i in range(len(exp_durs)):
         print('\t'.join([str(i + 1)] + [str(v) for v in exp_trials[i]]))
     print('\t'.join(["mean"] + [str(v) for v in mean_trials]))

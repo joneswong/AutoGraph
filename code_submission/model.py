@@ -213,7 +213,6 @@ class Model(object):
                         test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
-                    torch.cuda.empty_cache()
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
@@ -241,7 +240,6 @@ class Model(object):
             if SAVE_TEST_RESULTS:
                 test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
             self._scheduler.record(algo, valid_info, test_results)
-            torch.cuda.empty_cache()
 
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
