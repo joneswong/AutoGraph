@@ -8,7 +8,7 @@ import time
 import torch
 
 # from algorithms import GraphSAINTRandomWalkSampler
-from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
+from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo
 from algorithms.model_selection import select_algo_from_data
 from spaces import Categoric
 from schedulers import *
@@ -29,7 +29,9 @@ handler.setFormatter(
 logger.addHandler(handler)
 logger.propagate = False
 
-ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
+GCN_VERSIONs = ["dgl_gcn", "pyg_gcn"]
+GCN_VERSION = GCN_VERSIONs[0]
+ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo]
 ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
 HPO_STOPPER = STOPPERs[0]
@@ -46,7 +48,7 @@ FIX_FOCAL_LOSS = False
 DATA_SPLIT_RATE = [7, 1, 2]
 DATA_SPLIT_FOR_EACH_TRIAL = True
 SAVE_TEST_RESULTS = True
-CONSIDER_DIRECTED_GCN = False
+CONSIDER_DIRECTED_GCN = True
 CONDUCT_MODEL_SELECTION = False
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
@@ -87,7 +89,8 @@ class Model(object):
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
-        self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH}
+        self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
+                               "gcn_version": GCN_VERSION}
 
         self.cp_cnpy_file()
 
@@ -131,9 +134,16 @@ class Model(object):
 
         self.non_hpo_config["label_alpha"] = label_weights
         is_undirected = data.is_undirected()
+        is_real_weighted_graph = not (int(torch.sum(data.edge_weight)) == data.edge_index.shape[1])
+        data["real_weight_edge"] = is_real_weighted_graph
+        data["directed"] = not is_undirected  # used for directed DGL-GCN
+
         self.non_hpo_config["directed"] = not is_undirected and CONSIDER_DIRECTED_GCN
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
+        logger.info("The graph is {} weighted edge graph".format("real" if is_real_weighted_graph else "fake"))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
+
+        logger.info("Your gcn_version is {}".format(GCN_VERSION))
 
         global ALGO
         if CONDUCT_MODEL_SELECTION:
@@ -213,7 +223,7 @@ class Model(object):
                         test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
-                    torch.cuda.empty_cache()
+                    # torch.cuda.empty_cache()
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
@@ -241,7 +251,7 @@ class Model(object):
             if SAVE_TEST_RESULTS:
                 test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
             self._scheduler.record(algo, valid_info, test_results)
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 

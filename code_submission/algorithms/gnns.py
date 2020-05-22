@@ -31,24 +31,24 @@ def adaptive_message_func(edges):
 
 
 def adaptive_reduce_func(nodes):
-    '''
+    """
     compute metrics and determine if we need to do neighborhood aggregation.
-    '''
+    """
     # (n_nodes, n_edges, n_classes)
     _, pred = torch.max(nodes.mailbox['logits'], dim=2)
     _, center_pred = torch.max(nodes.data['logits'], dim=1)
-    n_degree = nodes.data['degree']
+    n_degree = nodes.data['in_degs']
     # case 1
     # ratio of common predictions
-    f1 = torch.sum(torch.eq(pred, center_pred.unsqueeze(1)), dim=1)/n_degree
+    f1 = torch.sum(torch.eq(pred, center_pred.unsqueeze(1)), dim=1).float() / n_degree
     f1 = f1.detach()
     # case 2
     # entropy of neighborhood predictions
     uniq = torch.unique(pred)
     # (n_unique)
-    cnts_p = torch.zeros((pred.size(0), uniq.size(0),)).cuda()
+    cnts_p = torch.zeros((pred.size(0), uniq.size(0),), device=pred.device)
     for i, val in enumerate(uniq):
-        tmp = torch.sum(torch.eq(pred, val), dim=1)/n_degree
+        tmp = torch.sum(torch.eq(pred, val), dim=1).float() / n_degree
         cnts_p[:, i] = tmp
     cnts_p = torch.clamp(cnts_p, min=1e-5)
 
@@ -70,7 +70,7 @@ def adaptive_attn_reduce_func(nodes):
     # (n_nodes, n_edges, n_classes)
     _, pred = torch.max(nodes.mailbox['logits'], dim=2)
     _, center_pred = torch.max(nodes.data['logits'], dim=1)
-    n_degree = nodes.data['degree']
+    n_degree = nodes.data['in_degs']
     # case 1
     # ratio of common predictions
     a = nodes.mailbox['a'].squeeze(3)  # (n_node, n_neighbor, n_head, 1)
@@ -99,18 +99,17 @@ def adaptive_attn_reduce_func(nodes):
 
 
 class GatedLayer(nn.Module):
-    def __init__(self, g, in_feats, out_feats, activation, dropout, lidx=1):
+    def __init__(self, in_feats, out_feats, activation=F.relu, lidx=1):
         super(GatedLayer, self).__init__()
         self.weight_neighbors = nn.Linear(in_feats, out_feats)
         self.activation = activation
-        self.dropout = nn.Dropout(p=dropout)
         self.tau_1 = nn.Parameter(torch.zeros((1,)))
         self.tau_2 = nn.Parameter(torch.zeros((1,)))
-
-        self.ln_1 = nn.LayerNorm((g.number_of_nodes()), elementwise_affine=False)
-        self.ln_2 = nn.LayerNorm((g.number_of_nodes()), elementwise_affine=False)
-
         self.reset_parameters(lidx)
+
+    def init_layer_norm(self, nodes_number):
+        self.ln_1 = nn.LayerNorm(nodes_number, elementwise_affine=False)
+        self.ln_2 = nn.LayerNorm(nodes_number, elementwise_affine=False)
 
     def reset_parameters(self, lidx, how='layerwise'):
         # initialize params
@@ -126,8 +125,7 @@ class GatedLayer(nn.Module):
         # TODO: training mode different from test mode
         # operates on a node
         g = g.local_var()
-        if self.dropout:
-            h = self.dropout(h)
+
         # g.ndata['h'] = h * g.ndata['norm'] # normalization by src
         g.ndata['h'] = h
         g.ndata['logits'] = logits
@@ -148,8 +146,8 @@ class GatedLayer(nn.Module):
 
         agg = g.ndata.pop('agg')
 
-        # normagg = self.weight_neighbors(agg)*g.ndata['norm']
-        normagg = agg * g.ndata['norm']  # normalization by tgt degree
+        # normagg = self.weight_neighbors(agg)*g.ndata['norm'].view(-1, 1)
+        normagg = agg * g.ndata['norm'].view(-1, 1)
 
         if self.activation:
             normagg = self.activation(normagg)
@@ -202,15 +200,17 @@ class DglGCNConv(nn.Module):
         if self.bias is not None:
             init.zeros_(self.bias)
 
-    def forward(self, graph, feat, weight=None):
+    def forward(self, graph, feat, weight=None, real_weighted_g=False):
         graph = graph.local_var()
 
-        # weighted degrees
-        graph.update_all(fn.copy_e("weight", "e_w"), fn.sum("e_w", "in_degs"))
-        degs = graph.ndata['in_degs']
+        if real_weighted_g:
+            # weighted degrees
+            graph.update_all(fn.copy_e("weight", "e_w"), fn.sum("e_w", "in_degs"))
+            degs = graph.ndata['in_degs']
 
         if self._norm == 'both':
-            # degs = graph.out_degrees().to(feat.device).float().clamp(min=1)
+            if not real_weighted_g:
+                degs = graph.out_degrees().to(feat.device).float().clamp(min=1)
             norm = th.pow(degs, -0.5)
             shp = norm.shape + (1,) * (feat.dim() - 1)
             norm = th.reshape(norm, shp)
@@ -229,23 +229,29 @@ class DglGCNConv(nn.Module):
             if weight is not None:
                 feat = th.matmul(feat, weight)
             graph.ndata['h'] = feat
-            fn.src_mul_edge()
-            # graph.update_all(fn.copy_src(src='h', out='m'),
-            graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
-                             fn.sum(msg='src_mul_edge', out='h'))
+            if real_weighted_g:
+                graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
+                                 fn.sum(msg='src_mul_edge', out='h'))
+            else:
+                graph.update_all(fn.copy_src(src='h', out='m'),
+                                 fn.sum(msg='m', out='h'))
             rst = graph.ndata['h']
         else:
             # aggregate first then mult W
             graph.ndata['h'] = feat
-            # graph.update_all(fn.copy_src(src='h', out='m'),
-            graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
-                             fn.sum(msg='src_mul_edge', out='h'))
+            if real_weighted_g:
+                graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
+                                 fn.sum(msg='src_mul_edge', out='h'))
+            else:
+                graph.update_all(fn.copy_src(src='h', out='m'),
+                                 fn.sum(msg='m', out='h'))
             rst = graph.ndata['h']
             if weight is not None:
                 rst = th.matmul(rst, weight)
 
         if self._norm != 'none':
-            # degs = graph.in_degrees().to(feat.device).float().clamp(min=1)
+            if not real_weighted_g:
+                degs = graph.in_degrees().to(feat.device).float().clamp(min=1)
             if self._norm == 'both':
                 norm = th.pow(degs, -0.5)
             else:

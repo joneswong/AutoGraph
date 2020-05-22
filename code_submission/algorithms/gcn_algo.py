@@ -21,7 +21,6 @@ from spaces import Categoric, Numeric
 logger = logging.getLogger('code_submission')
 
 
-# todo (daoyuan) change the GCNConv to DirectedGCNConv
 class GCN(torch.nn.Module):
     def __init__(self,
                  num_class,
@@ -114,7 +113,6 @@ class DGLGCN(torch.nn.Module):
         self.first_lin = Linear(features_num, hidden)
         self.convs = torch.nn.ModuleList()
         if directed:
-            # todo, implement the directedGCN for DGL
             self.convs.append(DglGCNConv(hidden, hidden * 2))
             hidden = hidden * 2
         else:
@@ -135,6 +133,11 @@ class DGLGCN(torch.nn.Module):
         self.lin2.reset_parameters()
 
     def forward(self, data):
+        is_real_weighted_graph = data["real_weight_edge"]
+        # norm_type = "right" if data["directed"] else "both"
+        # another directed GCN used in R-GCN, have not achieve improvements on feedback dataset 3
+        # for conv in self.convs:
+        #     conv._norm = norm_type
         if self.edge_droprate != 0.0:
             x = data.x
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
@@ -142,20 +145,22 @@ class DGLGCN(torch.nn.Module):
             self.g.add_nodes(data.num_nodes)
             self.g.add_edges(edge_index[0], edge_index[1])
             self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
-            self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+            if is_real_weighted_graph:
+                self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
             if self.g.number_of_nodes() == 0:  # first forward, build the graph once
                 self.g.add_nodes(data.num_nodes)
                 self.g.add_edges(edge_index[0], edge_index[1])
                 self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
-                self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+                if is_real_weighted_graph:
+                    self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
 
         if self.res_type == 0.0:
             x = F.relu(self.first_lin(x))
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             for conv in self.convs:
-                x = F.relu(conv(self.g, x))
+                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             x = self.lin2(x)
         else:
@@ -163,7 +168,7 @@ class DGLGCN(torch.nn.Module):
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             x_list = [] if self.directed else [x]
             for conv in self.convs:
-                x = F.relu(conv(self.g, x))
+                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
                 x_list.append(x)
             if self.res_type == 1.0:
                 x = x + x_list[0]
@@ -378,12 +383,19 @@ class GCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
-        self.model = DGLGCN(
-            num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5),
-            config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-            non_hpo_config.get("directed", False)).to(device)
-            # False).to(device)
+        self.gcn_version = non_hpo_config.get("gcn_version", "dgl_gcn")
+        if self.gcn_version == "dgl_gcn":
+            self.model = DGLGCN(
+                num_class, features_num, config.get("num_layers", 2),
+                config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+                config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
+                non_hpo_config.get("directed", False)).to(device)
+        elif self.gcn_version == "pyg_gcn":
+            self.model = GCN(
+                num_class, features_num, config.get("num_layers", 2),
+                config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+                config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
+                non_hpo_config.get("directed", False)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
