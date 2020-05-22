@@ -15,11 +15,51 @@ import torch.nn as nn
 from torch_geometric.utils.dropout import dropout_adj
 
 
+import torch as th
+from torch import nn
+from torch.nn import init
+
+import dgl.function as fn
+from dgl.base import DGLError
+
+
 def adaptive_message_func(edges):
     """
     send data for computing metrics and update.
     """
     return {'feat': edges.src['h'], 'logits': edges.src['logits']}
+
+
+def adaptive_reduce_func(nodes):
+    '''
+    compute metrics and determine if we need to do neighborhood aggregation.
+    '''
+    # (n_nodes, n_edges, n_classes)
+    _, pred = torch.max(nodes.mailbox['logits'], dim=2)
+    _, center_pred = torch.max(nodes.data['logits'], dim=1)
+    n_degree = nodes.data['degree']
+    # case 1
+    # ratio of common predictions
+    f1 = torch.sum(torch.eq(pred, center_pred.unsqueeze(1)), dim=1)/n_degree
+    f1 = f1.detach()
+    # case 2
+    # entropy of neighborhood predictions
+    uniq = torch.unique(pred)
+    # (n_unique)
+    cnts_p = torch.zeros((pred.size(0), uniq.size(0),)).cuda()
+    for i, val in enumerate(uniq):
+        tmp = torch.sum(torch.eq(pred, val), dim=1)/n_degree
+        cnts_p[:, i] = tmp
+    cnts_p = torch.clamp(cnts_p, min=1e-5)
+
+    f2 = (-1) * torch.sum(cnts_p * torch.log(cnts_p), dim=1)
+    f2 = f2.detach()
+    # neighbor_agg = torch.sum(nodes.mailbox['feat'], dim=1)
+    return {
+        'f1': f1,
+        'f2': f2,
+        # 'agg': neighbor_agg,
+    }
 
 
 def adaptive_attn_message_func(edges):
@@ -115,6 +155,120 @@ class GatedLayer(nn.Module):
             normagg = self.activation(normagg)
         new_h = h + gate.unsqueeze(1) * normagg
         return new_h, z
+
+
+def src_edge_weight_message_func(edges):
+    return {'src_mul_edge': edges.data['weight'] * edges.src['f']}
+
+
+def edge_weight_message_func(edges):
+    return {'edge_weight': edges.data['weight']}
+
+
+class DglGCNConv(nn.Module):
+    def __init__(self,
+                 in_feats,
+                 out_feats,
+                 norm='both',
+                 weight=True,
+                 bias=True,
+                 activation=None):
+        super(DglGCNConv, self).__init__()
+        if norm not in ('none', 'both', 'right'):
+            raise DGLError('Invalid norm value. Must be either "none", "both" or "right".'
+                           ' But got "{}".'.format(norm))
+        self._in_feats = in_feats
+        self._out_feats = out_feats
+        self._norm = norm
+
+        if weight:
+            self.weight = nn.Parameter(th.Tensor(in_feats, out_feats))
+        else:
+            self.register_parameter('weight', None)
+
+        if bias:
+            self.bias = nn.Parameter(th.Tensor(out_feats))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+        self._activation = activation
+
+    def reset_parameters(self):
+        """Reinitialize learnable parameters."""
+        if self.weight is not None:
+            init.xavier_uniform_(self.weight)
+        if self.bias is not None:
+            init.zeros_(self.bias)
+
+    def forward(self, graph, feat, weight=None):
+        graph = graph.local_var()
+
+        # weighted degrees
+        graph.update_all(fn.copy_e("weight", "e_w"), fn.sum("e_w", "in_degs"))
+        degs = graph.ndata['in_degs']
+
+        if self._norm == 'both':
+            # degs = graph.out_degrees().to(feat.device).float().clamp(min=1)
+            norm = th.pow(degs, -0.5)
+            shp = norm.shape + (1,) * (feat.dim() - 1)
+            norm = th.reshape(norm, shp)
+            feat = feat * norm
+
+        if weight is not None:
+            if self.weight is not None:
+                raise DGLError('External weight is provided while at the same time the'
+                               ' module has defined its own weight parameter. Please'
+                               ' create the module with flag weight=False.')
+        else:
+            weight = self.weight
+
+        if self._in_feats > self._out_feats:
+            # mult W first to reduce the feature size for aggregation.
+            if weight is not None:
+                feat = th.matmul(feat, weight)
+            graph.ndata['h'] = feat
+            fn.src_mul_edge()
+            # graph.update_all(fn.copy_src(src='h', out='m'),
+            graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
+                             fn.sum(msg='src_mul_edge', out='h'))
+            rst = graph.ndata['h']
+        else:
+            # aggregate first then mult W
+            graph.ndata['h'] = feat
+            # graph.update_all(fn.copy_src(src='h', out='m'),
+            graph.update_all(fn.u_mul_e("h", "weight", "src_mul_edge"),
+                             fn.sum(msg='src_mul_edge', out='h'))
+            rst = graph.ndata['h']
+            if weight is not None:
+                rst = th.matmul(rst, weight)
+
+        if self._norm != 'none':
+            # degs = graph.in_degrees().to(feat.device).float().clamp(min=1)
+            if self._norm == 'both':
+                norm = th.pow(degs, -0.5)
+            else:
+                # divide the aggregated messages by each node's in-degrees
+                norm = 1.0 / degs
+            shp = norm.shape + (1,) * (feat.dim() - 1)
+            norm = th.reshape(norm, shp)
+            rst = rst * norm
+
+        if self.bias is not None:
+            rst = rst + self.bias
+
+        if self._activation is not None:
+            rst = self._activation(rst)
+
+        return rst
+
+    def extra_repr(self):
+        summary = 'in={_in_feats}, out={_out_feats}'
+        summary += ', normalization={_norm}'
+        if '_activation' in self.__dict__:
+            summary += ', activation={_activation}'
+        return summary.format(**self.__dict__)
 
 
 class DirectedGCNConv(GCNConv):
