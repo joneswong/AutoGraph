@@ -169,7 +169,6 @@ class Ensembler(object):
         part_logits = list()
         cur_valid_part_idx = 0
         while (not scheduler.should_stop(SAFE_FRAC)): # and (cur_valid_part_idx < CV_NUM_FOLD):
-            # torch.cuda.empty_cache()
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
                 model.load_model(opt_record[1])
@@ -222,7 +221,6 @@ class Ensembler(object):
         finetuned_model_weights = list()
         cur_index = 0
         while not scheduler.should_stop(SAFE_FRAC):
-            # torch.cuda.empty_cache()
             opt_record = opt_records[cur_index % len(opt_records)]
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:

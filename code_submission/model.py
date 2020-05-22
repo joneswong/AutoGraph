@@ -48,7 +48,7 @@ FIX_FOCAL_LOSS = False
 DATA_SPLIT_RATE = [7, 1, 2]
 DATA_SPLIT_FOR_EACH_TRIAL = True
 SAVE_TEST_RESULTS = True
-CONSIDER_DIRECTED_GCN = True
+CONSIDER_DIRECTED_GCN = False
 CONDUCT_MODEL_SELECTION = False
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
@@ -223,7 +223,6 @@ class Model(object):
                         test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
-                    # torch.cuda.empty_cache()
             else:
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
@@ -251,7 +250,6 @@ class Model(object):
             if SAVE_TEST_RESULTS:
                 test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
             self._scheduler.record(algo, valid_info, test_results)
-            # torch.cuda.empty_cache()
 
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))
 
