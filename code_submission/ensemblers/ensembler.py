@@ -25,12 +25,14 @@ class Ensembler(object):
                  early_stopper,
                  config_selection='greedy',
                  training_strategy='cv',
+                 return_best=False,
                  *args,
                  **kwargs):
 
         self._ensembler_early_stopper = early_stopper
         self._config_selection = config_selection
         self._training_strategy = training_strategy
+        self._return_best = return_best
 
         if self._config_selection == 'greedy' and self._training_strategy == 'naive':
             assert isinstance(self._ensembler_early_stopper, ConstantStopper), "required to use ConstantStopper"
@@ -100,6 +102,7 @@ class Ensembler(object):
                     break
                 top_k = i + 1
                 # pre_performance = cur_performance
+            # top_k = min(10, top_k)
             return reversed_sorted_results[:top_k]
         else:
             # provide other strategies
@@ -221,8 +224,9 @@ class Ensembler(object):
         config_weights = list()
         finetuned_model_weights = list()
         cur_index = 0
+        tmp_results = None
+        tmp_valid_info = None
         while not scheduler.should_stop(SAFE_FRAC):
-            torch.cuda.empty_cache()
             opt_record = opt_records[cur_index % len(opt_records)]
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
             if not learn_from_scratch:
@@ -238,12 +242,21 @@ class Ensembler(object):
             while not scheduler.should_stop(SAFE_FRAC):
                 train_info = model.train(data, train_mask)
                 valid_info = model.valid(data, valid_mask)
+                if self._return_best and self._ensembler_early_stopper.should_log(train_info, valid_info):
+                    tmp_results = model.pred(data, make_decision=False)
+                    tmp_valid_info = valid_info
                 if self._ensembler_early_stopper.should_early_stop(train_info, valid_info) or self.train_over_all_data:
-                    activation = model.pred(data, make_decision=False)
-                    pr = F.softmax(activation)
-                    preds.append(pr)
-                    config_weights.append(opt_record[2]['accuracy'])
-                    finetuned_model_weights.append(valid_info['accuracy'])
+                    if self._return_best:
+                        pr = F.softmax(tmp_results)
+                        preds.append(pr)
+                        config_weights.append(opt_record[2]['accuracy'])
+                        finetuned_model_weights.append(tmp_valid_info['accuracy'])
+                    else:
+                        activation = model.pred(data, make_decision=False)
+                        pr = F.softmax(activation)
+                        preds.append(pr)
+                        config_weights.append(opt_record[2]['accuracy'])
+                        finetuned_model_weights.append(valid_info['accuracy'])
                     if self._ensembler_early_stopper.should_early_stop(train_info, valid_info):
                         break
             logger.info("the {}-th final model traverses the whole \

@@ -100,11 +100,12 @@ def get_label_weights(train_label, n_class):
     inversed_counts = 1.0 / counts
     # is_major = (counts > 100).astype(float)
     # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
-    normalize_factor = inversed_counts.sum()
-    inversed_counts = inversed_counts / normalize_factor
 
     T = 1.0
     inversed_counts = np.power(inversed_counts, T)
+
+    normalize_factor = inversed_counts.sum()
+    inversed_counts = inversed_counts / normalize_factor
 
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
@@ -246,6 +247,9 @@ def is_imbalanced_task(train_label, n_class):
     unique, counts = np.unique(train_label, return_counts=True)
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
+
+    logger.info(str(' '.join([str(i) for i in list(unique)])))
+    logger.info(str(' '.join([str(i) for i in list(counts)])))
 
     if np.max(counts) >= (0.8 * np.sum(counts)):
         return True, (counts < np.max(counts)).astype(np.float)

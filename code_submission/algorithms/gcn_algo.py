@@ -70,6 +70,8 @@ class GCN(torch.nn.Module):
             x_list = [] if self.directed else [x]
             for conv in self.convs:
                 x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                if self.res_type == 3.0 and len(x_list) != 0:
+                    x = x + x_list[0]
                 x_list.append(x)
             if self.res_type == 1.0:
                 x = x + x_list[0]
@@ -107,6 +109,7 @@ class FocalLoss(torch.nn.Module):
         self.device = device
         self.reduction = reduction
         self.is_minority = torch.tensor(is_minority, dtype=torch.float32, device=device).view(1, -1) if is_minority is not None else None
+        print(self.is_minority)
         self._EPSILON = 1e-7
         self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
@@ -145,10 +148,10 @@ class FocalLoss(torch.nn.Module):
             loss = weight * loss
         else:
             # soft implementation
-            # loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             # hard implementation
-            loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            # loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             weight = torch.sum(one_hot_target * self.alpha, dim=1)
             loss = weight * loss
@@ -258,7 +261,7 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(1, 4)), None, 2),
+        num_layers=Categoric(list(range(1, 4)), None, 3),
         hidden=Categoric([16, 32, 64, 128], None, 32),
         hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
@@ -271,7 +274,8 @@ class GCNAlgo(GNNAlgo):
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
-        res_type=Categoric([0., 1., 2.0], None, 0.)
+        res_type=Categoric([0., 1., 2.], None, 0.),
+        # res_type=Categoric([0., 1., 2., 3.], None, 0.)
     )
 
     def __init__(self,
