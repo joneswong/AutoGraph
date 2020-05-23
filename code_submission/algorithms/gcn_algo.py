@@ -12,14 +12,15 @@ from torch.nn import Linear
 from torch_geometric.nn import GCNConv
 from torch_geometric.utils.dropout import dropout_adj
 from sklearn.metrics import accuracy_score
-from .gnns import DirectedGCNConv
+from .gnns import DirectedGCNConv, DglGCNConv
+from dgl.nn.pytorch.conv import GraphConv
+import dgl
 
 from spaces import Categoric, Numeric
 
 logger = logging.getLogger('code_submission')
 
 
-# todo (daoyuan) change the GCNConv to DirectedGCNConv
 class GCN(torch.nn.Module):
     def __init__(self,
                  num_class,
@@ -102,6 +103,7 @@ class GCN(torch.nn.Module):
         return 4 * (num_nodes+num_edges) * hidden
 
 
+
 class FocalLoss(torch.nn.Module):
     def __init__(self, gamma=2, alpha=0.5, device=torch.device('cpu'), reduction="mean", is_minority=None):
         super(FocalLoss, self).__init__()
@@ -109,7 +111,6 @@ class FocalLoss(torch.nn.Module):
         self.device = device
         self.reduction = reduction
         self.is_minority = torch.tensor(is_minority, dtype=torch.float32, device=device).view(1, -1) if is_minority is not None else None
-        print(self.is_minority)
         self._EPSILON = 1e-7
         self.alpha = alpha
         if isinstance(alpha, list) or isinstance(alpha, np.ndarray):
@@ -148,10 +149,10 @@ class FocalLoss(torch.nn.Module):
             loss = weight * loss
         else:
             # soft implementation
-            loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            # loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             # hard implementation
-            # loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             weight = torch.sum(one_hot_target * self.alpha, dim=1)
             loss = weight * loss
@@ -205,7 +206,7 @@ class GNNAlgo(object):
         self.loss_type = config.get("loss_type", "focal_loss")
         self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device)
 
-    def train(self, data, data_mask, T = 1.0):
+    def train(self, data, data_mask, T=1.0):
         self.model.train()
         self._optimizer.zero_grad()
         if self.loss_type == "focal_loss":
@@ -287,19 +288,27 @@ class GCNAlgo(GNNAlgo):
                  ):
         self._device = device
         self._num_class = num_class
-        self.model = GCN(
-            num_class, features_num, config.get("num_layers", 2),
-            config.get("hidden", 16), config.get("hidden_droprate", 0.5),
-            config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-            non_hpo_config.get("directed", False)).to(device)
-            # False).to(device)
+        self.gcn_version = non_hpo_config.get("gcn_version", "dgl_gcn")
+        if self.gcn_version == "dgl_gcn":
+            self.model = DGLGCN(
+                num_class, features_num, config.get("num_layers", 2),
+                config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+                config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
+                non_hpo_config.get("directed", False)).to(device)
+        elif self.gcn_version == "pyg_gcn":
+            self.model = GCN(
+                num_class, features_num, config.get("num_layers", 2),
+                config.get("hidden", 16), config.get("hidden_droprate", 0.5),
+                config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
+                non_hpo_config.get("directed", False)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
             weight_decay=config.get("weight_decay", 5e-4))
         self._features_num = features_num
         self.loss_type = config.get("loss_type", "focal_loss")
-        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device, is_minority=non_hpo_config.get("is_minority", None))
+        self.fl_loss = FocalLoss(config.get("gamma", 2), non_hpo_config.get("label_alpha", []), device,
+                                 is_minority=non_hpo_config.get("is_minority", None))
 
     @classmethod
     def ensure_memory_safe(cls,

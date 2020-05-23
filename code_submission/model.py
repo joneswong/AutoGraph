@@ -8,7 +8,7 @@ import time
 import torch
 
 # from algorithms import GraphSAINTRandomWalkSampler
-from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo
+from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo
 from algorithms.model_selection import select_algo_from_data
 from spaces import Categoric
 from schedulers import *
@@ -29,7 +29,9 @@ handler.setFormatter(
 logger.addHandler(handler)
 logger.propagate = False
 
-ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo]
+GCN_VERSIONs = ["dgl_gcn", "pyg_gcn"]
+GCN_VERSION = GCN_VERSIONs[0]
+ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo]
 ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
 HPO_STOPPER = STOPPERs[0]
@@ -88,7 +90,8 @@ class Model(object):
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
-        self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH}
+        self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
+                               "gcn_version": GCN_VERSION}
 
         self.cp_cnpy_file()
 
@@ -131,11 +134,16 @@ class Model(object):
             data = generate_pyg_data_without_transform(data).to(self.device)
 
         self.non_hpo_config["label_alpha"] = label_weights
-        print('\n', label_weights, '\n')
         is_undirected = data.is_undirected()
+        is_real_weighted_graph = not (int(torch.sum(data.edge_weight)) == data.edge_index.shape[1])
+        data["real_weight_edge"] = is_real_weighted_graph
+        data["directed"] = not is_undirected  # used for directed DGL-GCN
+
         self.non_hpo_config["directed"] = not is_undirected and CONSIDER_DIRECTED_GCN
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
+        logger.info("The graph is {} weighted edge graph".format("real" if is_real_weighted_graph else "fake"))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
+        logger.info("Your gcn_version is {}".format(GCN_VERSION))
 
         global ALGO
         if CONDUCT_MODEL_SELECTION:
