@@ -145,10 +145,6 @@ class Model(object):
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
         logger.info("Your gcn_version is {}".format(GCN_VERSION))
 
-        logger.info("Your gcn_version is {}".format(GCN_VERSION))
-
-        logger.info("Your gcn_version is {}".format(GCN_VERSION))
-
         global ALGO
         if CONDUCT_MODEL_SELECTION:
             suiable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
