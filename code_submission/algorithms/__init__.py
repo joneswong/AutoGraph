@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 from algorithms.gcn_algo import GCNAlgo
-from algorithms.gnn_algo import SplineGCNAlgo, SplineGCN_APPNPAlgo
+from algorithms.gnn_algo import SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo
 # from algorithms.graph_saint_sampler import GraphSAINTRandomWalkSampler
 
 
@@ -15,4 +15,4 @@ agents = dict(
     )
 
 # __all__ = ["GCNAlgo", "SplineGCNAlgo", "SplineGCN_APPNPAlgo", "GraphSAINTRandomWalkSampler"]
-__all__ = ["GCNAlgo", "SplineGCNAlgo", "SplineGCN_APPNPAlgo"]
+__all__ = ["GCNAlgo", "SplineGCNAlgo", "SplineGCN_APPNPAlgo", "AdaGCNAlgo"]
