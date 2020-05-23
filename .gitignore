@@ -122,3 +122,5 @@ dmypy.json
 # .DS_Store and .idea/
 .DS_Store
 .idea/
+/data/amazon_electronics_computers.npz
+/data/amazon_electronics_photo.npz

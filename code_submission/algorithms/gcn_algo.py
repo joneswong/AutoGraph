@@ -103,6 +103,103 @@ class GCN(torch.nn.Module):
         return 4 * (num_nodes+num_edges) * hidden
 
 
+class DGLGCN(torch.nn.Module):
+    def __init__(self,
+                 num_class,
+                 features_num,
+                 num_layers=2,
+                 hidden=16,
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False):
+
+        super(DGLGCN, self).__init__()
+        self.first_lin = Linear(features_num, hidden)
+        self.convs = torch.nn.ModuleList()
+        if directed:
+            self.convs.append(DglGCNConv(hidden, hidden * 2))
+            hidden = hidden * 2
+        else:
+            self.convs.append(DglGCNConv(hidden, hidden))
+        for i in range(num_layers - 1):
+            self.convs.append(DglGCNConv(hidden, hidden))
+        self.lin2 = Linear(hidden, num_class)
+        self.hidden_droprate = hidden_droprate
+        self.edge_droprate = edge_droprate
+        self.res_type = res_type
+        self.directed = directed
+        self.g = dgl.DGLGraph()
+
+    def reset_parameters(self):
+        self.first_lin.reset_parameters()
+        for conv in self.convs:
+            conv.reset_parameters()
+        self.lin2.reset_parameters()
+
+    def forward(self, data):
+        is_real_weighted_graph = data["real_weight_edge"]
+        # norm_type = "right" if data["directed"] else "both"
+        # another directed GCN used in R-GCN, have not achieve improvements on feedback dataset 3
+        # for conv in self.convs:
+        #     conv._norm = norm_type
+        if self.edge_droprate != 0.0:
+            x = data.x
+            edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
+            self.g.clear()
+            self.g.add_nodes(data.num_nodes)
+            self.g.add_edges(edge_index[0], edge_index[1])
+            self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+            if is_real_weighted_graph:
+                self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+        else:
+            x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
+            if self.g.number_of_nodes() == 0:  # first forward, build the graph once
+                self.g.add_nodes(data.num_nodes)
+                self.g.add_edges(edge_index[0], edge_index[1])
+                self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+                if is_real_weighted_graph:
+                    self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+
+        if self.res_type == 0.0:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            for conv in self.convs:
+                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+        else:
+            x = F.relu(self.first_lin(x))
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x_list = [] if self.directed else [x]
+            for conv in self.convs:
+                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+                x_list.append(x)
+            if self.res_type == 1.0:
+                x = x + x_list[0]
+            elif self.res_type == 2.0:
+                x = torch.sum(torch.stack(x_list, 0), 0)
+            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+            x = self.lin2(x)
+
+        # return F.log_softmax(x, dim=-1)
+        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
+        return x
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+    @classmethod
+    def bottleneck_tensor_size(cls,
+                               num_nodes,
+                               num_edges,
+                               n_class,
+                               features_num,
+                               num_layers=2,
+                               hidden=16,
+                               hidden_droprate=0.5,
+                               edge_droprate=0.0):
+        """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
+        # each float/int occupies 4 bytes
+        return 4 * (num_nodes+num_edges) * hidden
+
 
 class FocalLoss(torch.nn.Module):
     def __init__(self, gamma=2, alpha=0.5, device=torch.device('cpu'), reduction="mean", is_minority=None):
