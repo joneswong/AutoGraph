@@ -102,7 +102,7 @@ class Ensembler(object):
                     break
                 top_k = i + 1
                 # pre_performance = cur_performance
-            # top_k = min(10, top_k)
+            top_k = min(10, top_k)
             return reversed_sorted_results[:top_k]
         else:
             # provide other strategies
