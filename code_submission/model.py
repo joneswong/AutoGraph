@@ -147,6 +147,8 @@ class Model(object):
 
         logger.info("Your gcn_version is {}".format(GCN_VERSION))
 
+        logger.info("Your gcn_version is {}".format(GCN_VERSION))
+
         global ALGO
         if CONDUCT_MODEL_SELECTION:
             suiable_algo, suitable_non_hpo_config = select_algo_from_data(ALGOs, data, self.non_hpo_config)
