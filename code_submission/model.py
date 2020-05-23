@@ -30,7 +30,7 @@ logger.addHandler(handler)
 logger.propagate = False
 
 GCN_VERSIONs = ["dgl_gcn", "pyg_gcn"]
-GCN_VERSION = GCN_VERSIONs[0]
+GCN_VERSION = GCN_VERSIONs[1]
 ALGOs = [GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo]
 ALGO = ALGOs[0]
 STOPPERs = [MemoryStopper, NonImprovementStopper, StableStopper, EmpiricalStopper]
