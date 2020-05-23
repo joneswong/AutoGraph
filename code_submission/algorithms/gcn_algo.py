@@ -170,7 +170,9 @@ class DGLGCN(torch.nn.Module):
             x = F.dropout(x, p=self.hidden_droprate, training=self.training)
             x_list = [] if self.directed else [x]
             for conv in self.convs:
-                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                if self.res_type == 3.0 and len(x_list) != 0:
+                    x = x + x_list[0]
                 x_list.append(x)
             if self.res_type == 1.0:
                 x = x + x_list[0]
