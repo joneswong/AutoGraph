@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GCNConv
 from torch_geometric.utils.dropout import dropout_adj
-from sklearn.metrics import accuracy_score
 from .gnns import DirectedGCNConv, DglGCNConv
 from dgl.nn.pytorch.conv import GraphConv
 import dgl
@@ -387,10 +386,8 @@ class GNNAlgo(object):
                 loss = F.cross_entropy(validation_output, validation_truth)
             else:
                 raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
-
-        cpu = torch.device('cpu')
-        accuracy = accuracy_score(validation_truth.to(cpu), validation_pre.to(cpu))
-        return {"loss": loss.item(), "accuracy": accuracy}
+        accuracy = torch.mean((validation_truth==validation_pre).float())
+        return {"loss": loss.item(), "accuracy": accuracy.item()}
     
     def pred(self, data, make_decision=True):
         self.model.eval()
