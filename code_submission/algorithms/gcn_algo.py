@@ -26,29 +26,43 @@ class GCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False, deep=True, wide=False):
 
+        if not wide and not deep:
+            raise NotImplementedError
         super(GCN, self).__init__()
-        self.first_lin = Linear(features_num, hidden)
-        self.convs = torch.nn.ModuleList()
-        if directed:
-            self.convs.append(DirectedGCNConv(hidden, hidden * 2))
-            hidden = hidden * 2
-        else:
-            self.convs.append(GCNConv(hidden, hidden))
-        for i in range(num_layers - 1):
-            self.convs.append(GCNConv(hidden, hidden))
-        self.lin2 = Linear(hidden, num_class)
+        if deep:
+            self.first_lin = Linear(features_num, hidden)
+            self.convs = torch.nn.ModuleList()
+            if directed:
+                self.convs.append(DirectedGCNConv(hidden, hidden * 2))
+                hidden = hidden * 2
+            else:
+                self.convs.append(GCNConv(hidden, hidden))
+            for i in range(num_layers - 1):
+                self.convs.append(GCNConv(hidden, hidden))
+            self.lin2 = Linear(hidden, num_class)
+        if wide:
+            self.wide_layer = Linear(features_num, num_class)
+            if deep:
+                self.attention_layer = Linear(features_num, 2)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
         self.res_type = res_type
         self.directed = directed
+        self.wide = wide
+        self.deep = deep
 
     def reset_parameters(self):
-        self.first_lin.reset_parameters()
-        for conv in self.convs:
-            conv.reset_parameters()
-        self.lin2.reset_parameters()
+        if self.deep:
+            self.first_lin.reset_parameters()
+            for conv in self.convs:
+                conv.reset_parameters()
+            self.lin2.reset_parameters()
+        if self.wide:
+            self.wide_layer.reset_parameters()
+            if self.deep:
+                self.attention_layer.reset_parameters()
 
     def forward(self, data):
         if self.edge_droprate != 0.0:
@@ -57,32 +71,45 @@ class GCN(torch.nn.Module):
         else:
             x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
 
-        if self.res_type == 0.0:
-            x = F.relu(self.first_lin(x))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            for conv in self.convs:
-                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x = self.lin2(x)
-        else:
-            x = F.relu(self.first_lin(x))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x_list = [] if self.directed else [x]
-            for conv in self.convs:
-                x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
-                if self.res_type == 3.0 and len(x_list) != 0:
+        deep_x, wide_x, attention = None, None, None
+        if self.deep:
+            if self.res_type == 0.0:
+                x = F.relu(self.first_lin(x))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                for conv in self.convs:
+                    x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x = self.lin2(x)
+            else:
+                x = F.relu(self.first_lin(x))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x_list = [] if self.directed else [x]
+                for conv in self.convs:
+                    x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                    if self.res_type == 3.0 and len(x_list) != 0:
+                        x = x + x_list[0]
+                    x_list.append(x)
+                if self.res_type == 1.0:
                     x = x + x_list[0]
-                x_list.append(x)
-            if self.res_type == 1.0:
-                x = x + x_list[0]
-            elif self.res_type == 2.0:
-                x = torch.sum(torch.stack(x_list, 0), 0)
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x = self.lin2(x)
+                elif self.res_type == 2.0:
+                    x = torch.sum(torch.stack(x_list, 0), 0)
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x = self.lin2(x)
+            deep_x = x
 
-        # return F.log_softmax(x, dim=-1)
-        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
-        return x
+        if self.wide:
+            wide_x = self.wide_layer(data.x)
+            if self.deep:
+                attention = torch.unsqueeze(F.softmax(self.attention_layer(data.x), dim=-1), dim=1)
+
+        if self.deep and self.wide:
+            return torch.sum(torch.stack([deep_x, wide_x], dim=2) * attention, dim=-1)
+        elif self.deep and not self.wide:
+            return deep_x
+        elif not self.deep and self.wide:
+            return wide_x
+        else:
+            return None
 
     def __repr__(self):
         return self.__class__.__name__
@@ -108,30 +135,45 @@ class DGLGCN(torch.nn.Module):
                  features_num,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False, deep=True, wide=False):
 
+        if not wide and not deep:
+            raise NotImplementedError
         super(DGLGCN, self).__init__()
-        self.first_lin = Linear(features_num, hidden)
-        self.convs = torch.nn.ModuleList()
-        if directed:
-            self.convs.append(DglGCNConv(hidden, hidden * 2))
-            hidden = hidden * 2
-        else:
-            self.convs.append(DglGCNConv(hidden, hidden))
-        for i in range(num_layers - 1):
-            self.convs.append(DglGCNConv(hidden, hidden))
-        self.lin2 = Linear(hidden, num_class)
+
+        if deep:
+            self.first_lin = Linear(features_num, hidden)
+            self.convs = torch.nn.ModuleList()
+            if directed:
+                self.convs.append(DglGCNConv(hidden, hidden * 2))
+                hidden = hidden * 2
+            else:
+                self.convs.append(DglGCNConv(hidden, hidden))
+            for i in range(num_layers - 1):
+                self.convs.append(DglGCNConv(hidden, hidden))
+            self.lin2 = Linear(hidden, num_class)
+        if wide:
+            self.wide_layer = Linear(features_num, num_class)
+            if deep:
+                self.attention_layer = Linear(features_num, 2)
         self.hidden_droprate = hidden_droprate
         self.edge_droprate = edge_droprate
         self.res_type = res_type
         self.directed = directed
+        self.deep = deep
+        self.wide = wide
         self.g = dgl.DGLGraph()
 
     def reset_parameters(self):
-        self.first_lin.reset_parameters()
-        for conv in self.convs:
-            conv.reset_parameters()
-        self.lin2.reset_parameters()
+        if self.deep:
+            self.first_lin.reset_parameters()
+            for conv in self.convs:
+                conv.reset_parameters()
+            self.lin2.reset_parameters()
+        if self.wide:
+            self.wide_layer.reset_parameters()
+            if self.deep:
+                self.attention_layer.reset_parameters()
 
     def forward(self, data):
         is_real_weighted_graph = data["real_weight_edge"]
@@ -157,32 +199,45 @@ class DGLGCN(torch.nn.Module):
                 if is_real_weighted_graph:
                     self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
 
-        if self.res_type == 0.0:
-            x = F.relu(self.first_lin(x))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            for conv in self.convs:
-                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x = self.lin2(x)
-        else:
-            x = F.relu(self.first_lin(x))
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x_list = [] if self.directed else [x]
-            for conv in self.convs:
-                x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
-                if self.res_type == 3.0 and len(x_list) != 0:
+        deep_x, wide_x, attention = None, None, None
+        if self.deep:
+            if self.res_type == 0.0:
+                x = F.relu(self.first_lin(x))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                for conv in self.convs:
+                    x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x = self.lin2(x)
+            else:
+                x = F.relu(self.first_lin(x))
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x_list = [] if self.directed else [x]
+                for conv in self.convs:
+                    x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+                    if self.res_type == 3.0 and len(x_list) != 0:
+                        x = x + x_list[0]
+                    x_list.append(x)
+                if self.res_type == 1.0:
                     x = x + x_list[0]
-                x_list.append(x)
-            if self.res_type == 1.0:
-                x = x + x_list[0]
-            elif self.res_type == 2.0:
-                x = torch.sum(torch.stack(x_list, 0), 0)
-            x = F.dropout(x, p=self.hidden_droprate, training=self.training)
-            x = self.lin2(x)
+                elif self.res_type == 2.0:
+                    x = torch.sum(torch.stack(x_list, 0), 0)
+                x = F.dropout(x, p=self.hidden_droprate, training=self.training)
+                x = self.lin2(x)
+            deep_x = x
 
-        # return F.log_softmax(x, dim=-1)
-        # due to focal loss: return the logits, put the log_softmax operation into the GNNAlgo
-        return x
+        if self.wide:
+            wide_x = self.wide_layer(data.x)
+            if self.deep:
+                attention = torch.unsqueeze(F.softmax(self.attention_layer(data.x), dim=-1), dim=1)
+
+        if self.deep and self.wide:
+            return torch.sum(torch.stack([deep_x, wide_x], dim=2) * attention, dim=-1)
+        elif self.deep and not self.wide:
+            return deep_x
+        elif not self.deep and self.wide:
+            return wide_x
+        else:
+            return None
 
     def __repr__(self):
         return self.__class__.__name__
@@ -247,10 +302,10 @@ class FocalLoss(torch.nn.Module):
             loss = weight * loss
         else:
             # soft implementation
-            # loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            loss = -torch.sum(torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             # hard implementation
-            loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
+            # loss = -torch.sum(one_hot_target * torch.pow(1 - pt, self.gamma).detach() * torch.log(pt + 1e-10), dim=1)
 
             weight = torch.sum(one_hot_target * self.alpha, dim=1)
             loss = weight * loss
@@ -372,7 +427,9 @@ class GCNAlgo(GNNAlgo):
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
         res_type=Categoric([0., 1., 2.], None, 0.),
-        # res_type=Categoric([0., 1., 2., 3.], None, 0.)
+        # res_type=Categoric([0., 1., 2., 3.], None, 0.),
+        wide_and_deep=Categoric(['deep'], None, 'deep'),
+        # wide_and_deep=Categoric(['wide', 'deep', 'wide_and_deep'], None, 'deep'),
     )
 
     def __init__(self,
@@ -385,18 +442,22 @@ class GCNAlgo(GNNAlgo):
         self._device = device
         self._num_class = num_class
         self.gcn_version = non_hpo_config.get("gcn_version", "dgl_gcn")
+        wide_and_deep = config.get("wide_and_deep", "deep")
+        deep = (wide_and_deep == 'deep' or wide_and_deep == 'wide_and_deep')
+        wide = (wide_and_deep == 'wide' or wide_and_deep == 'wide_and_deep')
+
         if self.gcn_version == "dgl_gcn":
             self.model = DGLGCN(
                 num_class, features_num, config.get("num_layers", 2),
                 config.get("hidden", 16), config.get("hidden_droprate", 0.5),
                 config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-                non_hpo_config.get("directed", False)).to(device)
+                non_hpo_config.get("directed", False), deep=deep, wide=wide).to(device)
         elif self.gcn_version == "pyg_gcn":
             self.model = GCN(
                 num_class, features_num, config.get("num_layers", 2),
                 config.get("hidden", 16), config.get("hidden_droprate", 0.5),
                 config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-                non_hpo_config.get("directed", False)).to(device)
+                non_hpo_config.get("directed", False), deep=deep, wide=wide).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),
