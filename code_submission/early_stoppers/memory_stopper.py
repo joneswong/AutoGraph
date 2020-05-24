@@ -24,11 +24,13 @@ class MemoryStopper(Stopper):
         self.performance_memory = [(0.0, 0) for i in range(max_step+1)]
         self.performance_windows = [None for i in range(WINDOW_SIZE)]
         self.index = 0
+        self.max_acc = -float('inf')
 
         super(MemoryStopper, self).__init__()
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
+        self.max_acc = max(self.max_acc, valid_info['accuracy'])
         # performance = get_performance(valid_info)
         performance = -valid_info['loss']
         self.performance_windows[self.index] = performance
@@ -46,7 +48,11 @@ class MemoryStopper(Stopper):
 
         return self._cur_step >= self._max_step
 
+    def should_log(self, train_info, valid_info):
+        return valid_info['accuracy'] > self.max_acc
+
     def reset(self):
         self._cur_step = 0
         self.index = 0
         self.performance_windows = [None for i in range(WINDOW_SIZE)]
+        self.max_acc = -float('inf')

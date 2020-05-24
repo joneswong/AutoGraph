@@ -70,6 +70,8 @@ class GCN(torch.nn.Module):
             x_list = [] if self.directed else [x]
             for conv in self.convs:
                 x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+                if self.res_type == 3.0 and len(x_list) != 0:
+                    x = x + x_list[0]
                 x_list.append(x)
             if self.res_type == 1.0:
                 x = x + x_list[0]
@@ -168,6 +170,8 @@ class DGLGCN(torch.nn.Module):
             x_list = [] if self.directed else [x]
             for conv in self.convs:
                 x = F.relu(conv(self.g, x, real_weighted_g=is_real_weighted_graph))
+                if self.res_type == 3.0 and len(x_list) != 0:
+                    x = x + x_list[0]
                 x_list.append(x)
             if self.res_type == 1.0:
                 x = x + x_list[0]
@@ -196,7 +200,6 @@ class DGLGCN(torch.nn.Module):
         """estimate the (gpu/cpu) memory consumption (in Byte) of the largest allocation"""
         # each float/int occupies 4 bytes
         return 4 * (num_nodes+num_edges) * hidden
-
 
 
 class FocalLoss(torch.nn.Module):
@@ -355,7 +358,7 @@ class GNNAlgo(object):
 class GCNAlgo(GNNAlgo):
 
     hyperparam_space = dict(
-        num_layers=Categoric(list(range(1, 4)), None, 2),
+        num_layers=Categoric(list(range(1, 4)), None, 3),
         hidden=Categoric([16, 32, 64, 128], None, 32),
         hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
@@ -368,7 +371,8 @@ class GCNAlgo(GNNAlgo):
         # todo (daoyuan): add pair_norm and batch_norm
         # loss_type=Categoric(["focal_loss", "ce_loss"], None, "ce_loss"),
         loss_type=Categoric(["ce_loss"], None, "ce_loss"),
-        res_type=Categoric([0., 1., 2.0], None, 0.)
+        res_type=Categoric([0., 1., 2.], None, 0.),
+        # res_type=Categoric([0., 1., 2., 3.], None, 0.)
     )
 
     def __init__(self,
