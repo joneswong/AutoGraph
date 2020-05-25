@@ -99,7 +99,7 @@ class Model(object):
             logger.info('copy files failed with error msg: {}'.format(err_msg))
 
     def cp_cnpy_file(self):
-        file_path = os.path.dirname(__file__) + '/cnpy_file'
+        file_path = os.path.join(os.path.dirname(__file__),'cnpy_file')
         file_name = ['libcnpy.so', 'libcnpy.a', 'cnpy.h', 'mat2npz', 'npy2mat', 'npz2mat']
         file_name = [os.path.join(file_path, each_file_name) for each_file_name in file_name]
         

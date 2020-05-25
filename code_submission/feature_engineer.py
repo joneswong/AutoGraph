@@ -134,18 +134,12 @@ def get_node_degree_binary(edge_index, edge_weight, num_nodes):
     degree_binary = np.concatenate([np.expand_dims(in_deg_binary,-1), np.expand_dims(out_deg_binary,-1)], axis=-1)
     return degree_binary
 
-def _foo_directed(x):
-    return str(x[0])+' '+str(x[1])
-
-def _foo_undirected(x):
-    return str(x[0])+' '+str(x[1]) if x[0] < x[1] else str(x[1])+' '+str(x[0])
-
 def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature, time_budget, epsilon=1e6, dims=128):
     file_path = os.path.dirname(__file__)
-    data_dir = file_path + '/NR_Dataset'
+    data_dir = os.path.join(file_path, 'NR_Dataset')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
-    embed_dir = file_path + '/NR_EB'
+    embed_dir = os.path.join(file_path, 'NR_EB')
     if not os.path.exists(embed_dir):
         os.makedirs(embed_dir)
     edges = edges.numpy().transpose([1,0]).astype(np.int32)
