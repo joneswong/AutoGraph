@@ -21,10 +21,12 @@ class NonImprovementStopper(Stopper):
         self._max_step = max_step
         self._step_with_max_performance = -1
         self._max_performance = -float('inf')
+        self.max_acc = -float('inf')
         super(NonImprovementStopper, self).__init__()
 
     def should_early_stop(self, train_info, valid_info):
         self._cur_step += 1
+        self.max_acc = max(self.max_acc, valid_info['accuracy'])
         cur_performance = -valid_info['loss']
         # cur_performance = valid_info['accuracy']
         if cur_performance > self._max_performance:
@@ -36,7 +38,11 @@ class NonImprovementStopper(Stopper):
             return True
         return self._cur_step >= self._max_step
 
+    def should_log(self, train_info, valid_info):
+        return valid_info['accuracy'] > self.max_acc
+
     def reset(self):
         self._cur_step = 0
         self._step_with_max_performance = -1
         self._max_performance = -float('inf')
+        self.max_acc = -float('inf')

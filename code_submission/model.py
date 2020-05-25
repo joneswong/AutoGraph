@@ -45,11 +45,12 @@ LEARN_FROM_SCRATCH = False
 #  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
-DATA_SPLIT_RATE = [7, 1, 2]
+DATA_SPLIT_RATE = [9, 1, 0]
 DATA_SPLIT_FOR_EACH_TRIAL = True
 SAVE_TEST_RESULTS = True
 CONSIDER_DIRECTED_GCN = False
 CONDUCT_MODEL_SELECTION = False
+LOG_BEST = True
 
 # loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
 #                                      num_steps=5, sample_coverage=1000,
@@ -85,7 +86,7 @@ class Model(object):
         # self.ensembler = ENSEMBLER(
         #     early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid')
+            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid', return_best=LOG_BEST)
         # schedulers conduct HPO
         # current implementation: HPO for only one model
         self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
@@ -125,10 +126,16 @@ class Model(object):
 
         train_y = data['train_label'][['label']].to_numpy()
         label_weights = get_label_weights(train_y, n_class)
-        self.imbalanced_task, self.is_minority_class = is_imbalanced_task(train_y, n_class)
+        self.imbalanced_task_type, self.is_minority_class = get_imbalanced_task_type(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
+            data = generate_pyg_data(data, n_class, time_budget,
+                                     use_label_distribution=
+                                     (self.imbalanced_task_type == 2),
+                                     use_node_degree=
+                                     (self.imbalanced_task_type == 2),
+                                     use_node_degree_binary=
+                                     (self.imbalanced_task_type == 2)).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
 
@@ -142,7 +149,6 @@ class Model(object):
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))
         logger.info("The graph is {} weighted edge graph".format("real" if is_real_weighted_graph else "fake"))
         logger.info("The graph has {} nodes and {} edges".format(data.num_nodes, data.edge_index.size(1)))
-
         logger.info("Your gcn_version is {}".format(GCN_VERSION))
 
         global ALGO
@@ -166,19 +172,30 @@ class Model(object):
 
         global FRAC_FOR_SEARCH
         global DATA_SPLIT_RATE
-        if self.imbalanced_task:
+        global LOG_BEST
+        if self.imbalanced_task_type == 1:
+            FRAC_FOR_SEARCH = 0.95
+            DATA_SPLIT_RATE = [1, 0, 0]
+            LOG_BEST = True
             ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
             ALGO.hyperparam_space['res_type'].default_value = 1.0
             self._hyperparam_space = ALGO.hyperparam_space
             self.hpo_early_stopper = AdaptiveWeightStopper()
             self.ensembler = ENSEMBLER(
-                early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hpo_trials')
+                early_stopper=self.ensembler_early_stopper, config_selection='auto',
+                training_strategy='hpo_trials', return_best=LOG_BEST)
             remain_time_budget = self._scheduler.get_remaining_time()
             self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
             self._scheduler.setup_timer(remain_time_budget)
-            FRAC_FOR_SEARCH = 0.95
-            DATA_SPLIT_RATE = [1, 0, 0]
             self.non_hpo_config['is_minority'] = self.is_minority_class
+        elif self.imbalanced_task_type == 2:
+            ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
+            # ALGO.hyperparam_space['res_type'].default_value = 1.0
+            ALGO.hyperparam_space['wide_and_deep'] = Categoric(['wide_and_deep'], None, "wide_and_deep")
+            self._hyperparam_space = ALGO.hyperparam_space
+            remain_time_budget = self._scheduler.get_remaining_time()
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler.setup_timer(remain_time_budget)
 
         train_mask, early_valid_mask, final_valid_mask = None, None, None
         if not DATA_SPLIT_FOR_EACH_TRIAL:
@@ -210,17 +227,18 @@ class Model(object):
         while not self._scheduler.should_stop(FRAC_FOR_SEARCH):
             if algo:
                 # within a trial, just continue the training
-                T = self._scheduler._early_stopper.get_T() if self.imbalanced_task else 1.0
+                T = self._scheduler._early_stopper.get_T() if self.imbalanced_task_type == 1 else 1.0
                 train_info = algo.train(data, train_mask, T)
                 early_stop_valid_info = algo.valid(data, early_valid_mask)
-                if self.imbalanced_task and self._scheduler._early_stopper.should_log(train_info, early_stop_valid_info):
+                if LOG_BEST and self._scheduler._early_stopper.should_log(train_info, early_stop_valid_info):
                     tmp_results = algo.pred(data, make_decision=False)
                     tmp_valid_info = algo.valid(data, final_valid_mask) if DATA_SPLIT_RATE[2] != 0.0 else early_stop_valid_info
                 if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
-                    valid_info = algo.valid(data, final_valid_mask) if not self.imbalanced_task else tmp_valid_info
+                    # valid_info = algo.valid(data, final_valid_mask) if not LOG_BEST else tmp_valid_info
+                    valid_info = algo.valid(data, final_valid_mask)
                     test_results = None
                     if SAVE_TEST_RESULTS:
-                        test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
+                        test_results = algo.pred(data, make_decision=False) if not LOG_BEST else tmp_results
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
             else:
@@ -245,10 +263,11 @@ class Model(object):
                     # have exhausted the search space
                     break
         if algo is not None:
-            valid_info = algo.valid(data, final_valid_mask) if not self.imbalanced_task else tmp_valid_info
+            # valid_info = algo.valid(data, final_valid_mask) if not LOG_BEST else tmp_valid_info
+            valid_info = algo.valid(data, final_valid_mask)
             test_results = None
             if SAVE_TEST_RESULTS:
-                test_results = algo.pred(data, make_decision=False) if not self.imbalanced_task else tmp_results
+                test_results = algo.pred(data, make_decision=False) if not LOG_BEST else tmp_results
             self._scheduler.record(algo, valid_info, test_results)
 
         logger.info("remaining {}s after HPO".format(self._scheduler.get_remaining_time()))

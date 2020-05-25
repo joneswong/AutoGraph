@@ -20,5 +20,8 @@ class Stopper(object):
         """
         raise NotImplementedError
 
+    def should_log(self, train_info, valid_info):
+        return False
+
     def get_cur_step(self):
         return self._cur_step

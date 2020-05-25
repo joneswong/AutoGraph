@@ -25,7 +25,9 @@ def fix_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_feature_generation=True):
+def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_feature_generation=True,
+                      use_label_distribution=False, use_node_degree=False, use_node_degree_binary=False,
+                      use_node_embed=True):
     x = data['fea_table']
 
     df = data['edge_file']
@@ -44,7 +46,7 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
 
     train_indices = data['train_indices']
     test_indices = data['test_indices']
-    
+
 
     flag_directed_graph = not is_undirected(edge_index)
 
@@ -55,9 +57,14 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
     else:
         x = x.to_numpy()
         flag_none_feature = (x.shape[1] == 1)
-    
+
     if use_feature_generation:
-        added_features = feature_generation(x, y, n_class, edge_index, edge_weight,  flag_none_feature, flag_directed_graph, time_budget)
+        added_features = feature_generation(x, y, n_class, edge_index, edge_weight,
+                                            flag_none_feature, flag_directed_graph, time_budget,
+                                            use_label_distribution=use_label_distribution,
+                                            use_node_degree=use_node_degree,
+                                            use_node_degree_binary=use_node_degree_binary,
+                                            use_node_embed=use_node_embed)
         if added_features:
             x = np.concatenate([x]+added_features, axis=1)
 
@@ -100,11 +107,12 @@ def get_label_weights(train_label, n_class):
     inversed_counts = 1.0 / counts
     # is_major = (counts > 100).astype(float)
     # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
-    normalize_factor = inversed_counts.sum()
-    inversed_counts = inversed_counts / normalize_factor
 
     T = 1.0
     inversed_counts = np.power(inversed_counts, T)
+
+    normalize_factor = inversed_counts.sum()
+    inversed_counts = inversed_counts / normalize_factor
 
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
@@ -242,12 +250,20 @@ def divide_data_label_wise(data, split_rates, device, n_class, train_y):
     return tuple(masks)
 
 
-def is_imbalanced_task(train_label, n_class):
+def get_imbalanced_task_type(train_label, n_class):
     unique, counts = np.unique(train_label, return_counts=True)
     if not len(counts) == n_class:
         raise ValueError("Your train_label has different label size to the meta_n_class")
 
-    if np.max(counts) >= (0.8 * np.sum(counts)):
-        return True, (counts < np.max(counts)).astype(np.float)
+    logger.info(str(' '.join([str(i) for i in list(unique)])))
+    logger.info(str(' '.join([str(i) for i in list(counts)])))
+
+    sorted_counts = np.sort(counts)
+    # one major class
+    if sorted_counts[-1] >= (0.8 * np.sum(sorted_counts)):
+        return 1, (counts < sorted_counts[-1]).astype(np.float)
+    # two major classes
+    elif n_class >= 3 and ((sorted_counts[-1] + sorted_counts[-2]) >= (0.9 * np.sum(sorted_counts))):
+        return 2, None
     else:
-        return False, None
+        return 0, None
