@@ -2,8 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import logging
 import time
+import subprocess
 
 import torch
 
@@ -16,9 +18,6 @@ from early_stoppers import *
 from algorithms import GCNAlgo
 from ensemblers import Ensembler
 from utils import *
-from torch_geometric.data import DataLoader
-import subprocess
-import os
 
 logger = logging.getLogger('code_submission')
 logger.setLevel('DEBUG')
@@ -76,6 +75,21 @@ class Model(object):
         a_cpu = torch.ones((10,), dtype=torch.float32)
         a_gpu = a_cpu.to(self.device)
 
+        # make a folder for saving ckpts/outputs
+        suffix = str(time.time()).replace('.', '')
+        while os.path.exists("tc"+suffix):
+            suffix = str(time.time()).replace('.', '')
+        self._working_folder = ""
+        try:
+            os.makedirs("tc"+suffix)
+            self._working_folder = "tc"+suffix
+        except FileExistsError as ex:
+            logger.exception("folder {} has existed".format("tc".format(suffix)))
+        except Exception as ex:
+            logger.exception("Unexpected error!")
+        finally:
+            pass
+
         self._hyperparam_space = ALGO.hyperparam_space
         # used by the scheduler for deciding when to stop each trial
         self.hpo_early_stopper = HPO_STOPPER(max_step=500)
@@ -89,7 +103,7 @@ class Model(object):
             early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid', return_best=LOG_BEST)
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
         self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
                                "gcn_version": GCN_VERSION}
 
@@ -119,7 +133,7 @@ class Model(object):
         self._hyperparam_space = ALGO.hyperparam_space
         logger.info('Change to algo: %s', ALGO)
         logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
-        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
         self._scheduler.setup_timer(remain_time_budget)
 
     def train_predict(self, data, time_budget, n_class, schema):
@@ -156,7 +170,6 @@ class Model(object):
                 remain_time_budget = self._scheduler.get_remaining_time()
                 self.change_algo(suiable_algo, remain_time_budget)
                 ALGO = suiable_algo
-        # loader = DataLoader(data, batch_size=32, shuffle=True)
 
         change_hyper_space = ALGO.ensure_memory_safe(data.x.size()[0], data.edge_weight.size()[0],
                                                      n_class, data.x.size()[1], not is_undirected)
@@ -164,7 +177,7 @@ class Model(object):
             self._hyperparam_space = ALGO.hyperparam_space
             logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
 
         global FRAC_FOR_SEARCH
@@ -182,7 +195,7 @@ class Model(object):
                 early_stopper=self.ensembler_early_stopper, config_selection='auto',
                 training_strategy='hpo_trials', return_best=LOG_BEST)
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
             self.non_hpo_config['is_minority'] = self.is_minority_class
         elif self.imbalanced_task_type == 2:
@@ -194,7 +207,7 @@ class Model(object):
             ALGO.hyperparam_space['wide_and_deep'] = Categoric(['deep'], None, "deep")
             self._hyperparam_space = ALGO.hyperparam_space
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
 
         train_mask, early_valid_mask, final_valid_mask = None, None, None

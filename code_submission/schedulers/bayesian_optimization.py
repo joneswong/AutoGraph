@@ -17,10 +17,11 @@ class BayesianOptimizer(Scheduler):
     def __init__(self,
                  hyperparam_space,
                  early_stopper,
-                 ensembler):
+                 ensembler,
+                 working_folder):
 
         super(BayesianOptimizer, self).__init__(
-            hyperparam_space, early_stopper, ensembler)
+            hyperparam_space, early_stopper, ensembler, working_folder)
 
         self._cur_config = self.get_default()
         self.bo_params = {}
