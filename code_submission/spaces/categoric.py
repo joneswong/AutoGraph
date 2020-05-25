@@ -16,3 +16,6 @@ class Categoric(Space):
         space_desc = "categories is %s, subspaces is %s, default_value is %s." % \
                      (str(self.categories), str(self.subspaces), str(self.default_value))
         return space_desc
+
+    def aug_values(self, values):
+        self.categories.extend(values)

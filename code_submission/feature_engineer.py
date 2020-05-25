@@ -108,8 +108,29 @@ def get_neighbor_label_distribution(edges, y, n_class):
     # the last dimension is 'unknow' (the labels of test nodes)
     norm_matrix = np.sum(distribution[:,:-1], axis=1, keepdims=True) + EPSILON
     distribution = distribution[:,:-1] / norm_matrix
-    
+
     return distribution
+
+def get_one_hot_label(y, n_class):
+    n_nodes = len(y)
+
+    #  y is a tensor having shape [#nodes]
+    categorical_y = y.view(-1, 1)
+    categorical_y = categorical_y * (categorical_y < n_class).type(torch.int32)
+    one_hot_label = torch.zeros([n_nodes, n_class], dtype=torch.int32, device=categorical_y.device)
+    one_hot_label.scatter_(1, categorical_y, 1)
+
+    # mask test sample
+    one_hot_label = one_hot_label * (categorical_y < n_class).float()
+    
+    # return ndarray to fit to the following "np.concatnation"
+    return one_hot_label.numpy()
+    #num_nodes = len(y)
+    #one_hot_label = np.zeros([num_nodes, n_class], dtype=np.float32)
+    #for i in range(num_nodes):
+    #    if y[i] < n_class:
+    #        one_hot_label[i][y[i]] = 1.0
+    #return one_hot_label
 
 def get_node_degree(edge_index, edge_weight, num_nodes):
     row, col = edge_index
@@ -147,7 +168,7 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
     num_edges = len(edges)
     if num_edges < epsilon and num_nodes<1e5: 
         STRAP_epsilon = 1e-4
-        timeout = int(0.25*time_budget)
+        timeout = int(0.35*time_budget)
     elif num_edges < 10*epsilon and num_nodes<1e5:
         STRAP_epsilon = 5e-4
         timeout = int(0.35*time_budget)
@@ -168,7 +189,7 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
                         'STRAP', data_dir+'/', embed_dir+'/',
                         '0.5 12', str(STRAP_epsilon), '8', str(dims), str(num_nodes)])
 
-        cmd_return = subprocess.run(run_commands, shell=True, timeout=timeout)
+        cmd_return = subprocess.run(run_commands.split(' '), shell=False, timeout=timeout)
         flag_error = False
         #logger.info('chomod commands return: {}'.format(proc.returncode))
     except subprocess.TimeoutExpired as timeout_msg:
@@ -217,7 +238,7 @@ def dim_reduction(x, use_normalizer=False):
 
     return x, flag_none_feature
 
-def feature_generation(x, y, n_class, edges, weights, flag_none_feature, flag_directed_graph, time_budget, use_label_distribution=False, use_node_degree=False, use_node_degree_binary=False, use_node_embed=True):
+def feature_generation(x, y, n_class, edges, weights, flag_none_feature, flag_directed_graph, time_budget, use_label_distribution=False, use_node_degree=False, use_node_degree_binary=False, use_node_embed=True, use_one_hot_label=False):
 
     added_features = list()
     start_time = time.time()
@@ -237,6 +258,11 @@ def feature_generation(x, y, n_class, edges, weights, flag_none_feature, flag_di
         node_degree_binary = get_node_degree_binary(edges, weights, num_nodes)
         added_features.append(node_degree_binary)
         logger.info('degree_binary time_cost: {}'.format(time.time() - start_time))
+
+    if use_one_hot_label:
+        one_hot_label = get_one_hot_label(y, n_class)
+        added_features.append(one_hot_label)
+        logger.info('one_hot_label time_cost: '.format(time.time() - start_time))
 
     if use_node_embed:
         flag_error, node_embed = run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature, time_budget)

@@ -156,7 +156,10 @@ class Ensembler(object):
             weighted_preds_of_hpo_trials = self.hpo_history_ensembler(opt_records, device)
             weighted_preds_of_naive_results = self.naive_ensembler(opt_records, data, device, n_class, num_features,
                                                                    scheduler, algo, learn_from_scratch, non_hpo_config, train_y)
-            weighted_preds = torch.cat([weighted_preds_of_hpo_trials, weighted_preds_of_naive_results], 0)
+            if weighted_preds_of_naive_results is not None:
+                weighted_preds = torch.cat([weighted_preds_of_hpo_trials, weighted_preds_of_naive_results], 0)
+            else:
+                weighted_preds = weighted_preds_of_hpo_trials
             pred = torch.argmax(torch.mean(weighted_preds, 0), -1).flatten()
             return pred.cpu().numpy()
         else:
@@ -225,6 +228,7 @@ class Ensembler(object):
         cur_index = 0
         tmp_results = None
         tmp_valid_info = None
+        valid_info = None
         while not scheduler.should_stop(SAFE_FRAC):
             opt_record = opt_records[cur_index % len(opt_records)]
             model = algo(n_class, num_features, device, opt_record[0], non_hpo_config)
@@ -266,26 +270,28 @@ class Ensembler(object):
                     pass
                 else:
                     parts = divide_data_label_wise(data, CV_NUM_FOLD * [10 / CV_NUM_FOLD], device, n_class, train_y)
-        if len(preds) == 0:
+        if len(preds) == 0 and valid_info is not None:
             logger.warn("have not completed even one training course")
             activation = model.pred(data, make_decision=False)
             pr = F.softmax(activation)
             preds.append(pr)
             config_weights.append(opt_record[2]['accuracy'])
-        # weighted average the probabilities
-        config_weights = torch.tensor(np.asarray(config_weights), dtype=torch.float32).to(device)
-        # config_weights = config_weights / torch.sum(config_weights)
-        if len(finetuned_model_weights):
+            finetuned_model_weights.append(valid_info['accuracy'])
+            
+        if len(preds):
+            # weighted average the probabilities
+            config_weights = torch.tensor(np.asarray(config_weights), dtype=torch.float32).to(device)
+            # config_weights = config_weights / torch.sum(config_weights)
             finetuned_model_weights = torch.tensor(np.asarray(finetuned_model_weights), dtype=torch.float32).to(device)
             # finetuned_model_weights = finetuned_model_weights / torch.sum(finetuned_model_weights)
             weights = 0.5 * (config_weights + finetuned_model_weights)
+            logger.info("average {} models with their validation performances {}".format(len(preds), weights))
+            single_shape = preds[0].shape
+            preds = torch.reshape(torch.stack(preds), weights.shape + single_shape)
+            weighted_preds = torch.reshape(weights, weights.shape + (1, 1)) * preds
+            return weighted_preds
         else:
-            weights = config_weights
-        logger.info("average {} models with their validation performances {}".format(len(preds), weights))
-        single_shape = preds[0].shape
-        preds = torch.reshape(torch.stack(preds), weights.shape + single_shape)
-        weighted_preds = torch.reshape(weights, weights.shape + (1, 1)) * preds
-        return weighted_preds
+            return None
 
     def hpo_history_ensembler(self, opt_records, device):
         part_logits = []

@@ -96,3 +96,15 @@ class Scheduler(object):
             n_class, num_features, device, data, self, algo,
             considered_configs, learn_from_scratch, non_hpo_config, train_y)
         return predictions
+
+    def __len__(self):
+        return len(self._results)
+
+    def aug_hyperparam_space(self, hyperparam_name, hyperparam_desc, hyperparam_values=None):
+        if hyperparam_name not in self._hyperparam_space:
+            self._hyperparam_space[hyperparam_name] = hyperparam_desc
+        else:
+            self._hyperparam_space[hyperparam_name].aug_values(hyperparam_values)
+
+    def update_hyperparam_space(self, hyperparam_name, hyperparam_desc):
+        self._hyperparam_space[hyperparam_name] = hyperparam_desc

@@ -6,10 +6,11 @@ import os
 import logging
 import time
 import subprocess
+import threading
+import copy
 
 import torch
 
-# from algorithms import GraphSAINTRandomWalkSampler
 from algorithms import GCNAlgo, SplineGCNAlgo, SplineGCN_APPNPAlgo, AdaGCNAlgo
 from algorithms.model_selection import select_algo_from_data
 from spaces import Categoric
@@ -51,10 +52,38 @@ CONSIDER_DIRECTED_GCN = False
 CONDUCT_MODEL_SELECTION = False
 LOG_BEST = True
 
-# loader = GraphSAINTRandomWalkSampler(data, batch_size=1000, walk_length=5,
-#                                      num_steps=5, sample_coverage=1000,
-#                                      save_dir=,
-#                                      num_workers=4)
+
+class FEGen(threading.Thread):
+
+    def __init__(self, signal, returns, **kwargs):
+        threading.Thread.__init__(self)
+
+        self._signal = signal
+        self._returns = returns
+        self.x = kwargs["x"]
+        self.y = kwargs["y"]
+        self.n_class = kwargs["n_class"]
+        self.edge_index = kwargs["edge_index"]
+        self.edge_weight = kwargs["edge_weight"]
+        self.flag_none_feature = kwargs["flag_none_feature"]
+        self.flag_directed_graph = kwargs["flag_directed_graph"]
+        self.time_budget = kwargs["time_budget"]
+        self.use_label_distribution = kwargs["use_label_distribution"]
+        self.use_node_degree = kwargs["use_node_degree"]
+        self.use_node_degree_binary = kwargs["use_node_degree_binary"]
+        self.use_node_embed = kwargs["use_node_embed"]
+
+    def run(self):
+        added_features = feature_generation(self.x, self.y, self.n_class, self.edge_index, self.edge_weight,
+                                            self.flag_none_feature, self.flag_directed_graph, self.time_budget,
+                                            use_label_distribution=False,
+                                            use_node_degree=False,
+                                            use_node_degree_binary=False,
+                                            use_node_embed=True,
+                                            use_one_hot_label=False)
+        if added_features:
+            self._returns.extend(added_features)
+        self._signal.set()
 
 
 class Model(object):
@@ -103,8 +132,9 @@ class Model(object):
             early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid', return_best=LOG_BEST)
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
+        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler, self._working_folder)
         self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
+                               'self_loop': True,
                                "gcn_version": GCN_VERSION}
 
         try:
@@ -132,7 +162,7 @@ class Model(object):
         self._hyperparam_space = ALGO.hyperparam_space
         logger.info('Change to algo: %s', ALGO)
         logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
-        self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
+        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler, self._working_folder)
         self._scheduler.setup_timer(remain_time_budget)
 
     def train_predict(self, data, time_budget, n_class, schema):
@@ -145,7 +175,15 @@ class Model(object):
         self.imbalanced_task_type, self.is_minority_class = get_imbalanced_task_type(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
+            data, fe_args, only_one_hot_id = generate_pyg_data(
+                data, n_class, time_budget, use_node_embed=False, use_one_hot_label=(self.imbalanced_task_type==2))
+            fe_ready_signal = threading.Event()
+            feature_has_been_updated = False
+            augmented_features = list()
+            fe_builder = FEGen(fe_ready_signal, augmented_features, **fe_args)
+            fe_builder.start()
+            data = data.to(self.device)
+            original_feature_dim = data.x.size()[1]
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
 
@@ -203,9 +241,11 @@ class Model(object):
             DATA_SPLIT_RATE = [7, 1, 2]
             LOG_BEST = False
             ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
-            ALGO.hyperparam_space['res_type'] = Categoric([0., 1.], None, 0.)
+            ALGO.hyperparam_space['res_type'] = Categoric([0.], None, 0.)
             ALGO.hyperparam_space['num_layers'] = Categoric(list(range(1, 4)), None, 2)
             ALGO.hyperparam_space['wide_and_deep'] = Categoric(['deep'], None, "deep")
+            ALGO.hyperparam_space['hidden_droprate'] = Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5)
+            self.non_hpo_config['self_loop'] = False
             self._hyperparam_space = ALGO.hyperparam_space
             remain_time_budget = self._scheduler.get_remaining_time()
             self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
@@ -235,6 +275,11 @@ class Model(object):
         logger.info('Ensembler: %s', type(self.ensembler).__name__)
         logger.info('Learn from scratch in ensembler: %s', self.non_hpo_config["LEARN_FROM_SCRATCH"])
 
+        if FEATURE_ENGINEERING:
+            # we need to update the hyperparam space of our scheduler due to the change of feature space
+            self._scheduler.aug_hyperparam_space(
+                "fe", Categoric([":"+str(original_feature_dim)], None, ":"+str(original_feature_dim)))
+
         algo = None
         tmp_results = None
         tmp_valid_info = None
@@ -256,6 +301,29 @@ class Model(object):
                     self._scheduler.record(algo, valid_info, test_results)
                     algo = None
             else:
+                if not feature_has_been_updated and fe_ready_signal.is_set():
+                    # augmented features have been generated
+                    fe_builder.join()
+                    feature_has_been_updated = True
+                    logger.info("====== the feature generation thread completed after {} trials ======".format(len(self._scheduler)))
+                    if augmented_features:
+                        augmented_feature = np.concatenate(augmented_features, axis=1).astype(np.float32)
+                        augmented_feature = torch.from_numpy(augmented_feature).to(data.x.device)
+                        data.x = torch.cat([data.x, augmented_feature], -1)
+                        if not only_one_hot_id:
+                            # self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim)+":", ":"])
+                            if self.imbalanced_task_type == 2:
+                                self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim) + ":", ":"])
+                            else:
+                                ALGO.hyperparam_space['fe'] = Categoric([":"], None, ":")
+                                self._hyperparam_space = ALGO.hyperparam_space
+                                self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
+                        else:
+                            ALGO.hyperparam_space['fe'] = Categoric([str(original_feature_dim)+":"], None,
+                                                                    str(original_feature_dim)+":")
+                            self._hyperparam_space = ALGO.hyperparam_space
+                            self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
+
                 # trigger a new trial
                 config = self._scheduler.get_next_config()
                 if config:

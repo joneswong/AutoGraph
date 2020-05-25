@@ -21,16 +21,28 @@ logger = logging.getLogger('code_submission')
 
 
 class GCN(torch.nn.Module):
+
     def __init__(self,
                  num_class,
                  features_num,
+                 fe,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False, deep=True, wide=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False, deep=True, wide=False, self_loop=False):
 
         if not wide and not deep:
             raise NotImplementedError
         super(GCN, self).__init__()
+
+        self._fe = fe
+        if self._fe == ":":
+            # take both original and augmented features
+            pass
+        elif self._fe.startswith(":"):
+            features_num = int(self._fe[1:])
+        else:
+            features_num = features_num - int(self._fe[:-1])
+
         if deep:
             self.first_lin = Linear(features_num, hidden)
             self.convs = torch.nn.ModuleList()
@@ -52,6 +64,8 @@ class GCN(torch.nn.Module):
         self.directed = directed
         self.wide = wide
         self.deep = deep
+        # tbd: self_loop
+        self.self_loop = self_loop
 
     def reset_parameters(self):
         if self.deep:
@@ -65,11 +79,19 @@ class GCN(torch.nn.Module):
                 self.attention_layer.reset_parameters()
 
     def forward(self, data):
+        # make feature selection accordingly
+        if self._fe == ":":
+            datax = data.x
+        elif self._fe.startswith(":"):
+            datax = data.x[:,:int(self._fe[1:])]
+        else:
+            datax = data.x[:,int(self._fe[:-1]):]
+
         if self.edge_droprate != 0.0:
-            x = data.x
+            x = datax
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
         else:
-            x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
+            x, edge_index, edge_weight = datax, data.edge_index, data.edge_weight
 
         deep_x, wide_x, attention = None, None, None
         if self.deep:
@@ -98,9 +120,9 @@ class GCN(torch.nn.Module):
             deep_x = x
 
         if self.wide:
-            wide_x = self.wide_layer(data.x)
+            wide_x = self.wide_layer(datax)
             if self.deep:
-                attention = torch.unsqueeze(F.softmax(self.attention_layer(data.x), dim=-1), dim=1)
+                attention = torch.unsqueeze(F.softmax(self.attention_layer(datax), dim=-1), dim=1)
 
         if self.deep and self.wide:
             return torch.sum(torch.stack([deep_x, wide_x], dim=2) * attention, dim=-1)
@@ -130,16 +152,28 @@ class GCN(torch.nn.Module):
 
 
 class DGLGCN(torch.nn.Module):
+
     def __init__(self,
                  num_class,
                  features_num,
+                 fe,
                  num_layers=2,
                  hidden=16,
-                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0, directed=False, deep=True, wide=False):
+                 hidden_droprate=0.5, edge_droprate=0.0, res_type=0.0,
+                 directed=False, deep=True, wide=False, self_loop=True):
 
         if not wide and not deep:
             raise NotImplementedError
         super(DGLGCN, self).__init__()
+
+        self._fe = fe
+        if self._fe == ":":
+            # take both original and augmented features
+            pass
+        elif self._fe.startswith(":"):
+            features_num = int(self._fe[1:])
+        else:
+            features_num = features_num - int(self._fe[:-1])
 
         if deep:
             self.first_lin = Linear(features_num, hidden)
@@ -162,6 +196,7 @@ class DGLGCN(torch.nn.Module):
         self.directed = directed
         self.deep = deep
         self.wide = wide
+        self.self_loop = self_loop
         self.g = dgl.DGLGraph()
 
     def reset_parameters(self):
@@ -181,23 +216,40 @@ class DGLGCN(torch.nn.Module):
         # another directed GCN used in R-GCN, have not achieve improvements on feedback dataset 3
         # for conv in self.convs:
         #     conv._norm = norm_type
+
+        # make feature selection accordingly
+        if self._fe == ":":
+            datax = data.x
+        elif self._fe.startswith(":"):
+            datax = data.x[:,:int(self._fe[1:])]
+        else:
+            datax = data.x[:,int(self._fe[:-1]):]
+
         if self.edge_droprate != 0.0:
-            x = data.x
+            x = datax
             edge_index, edge_weight = dropout_adj(data.edge_index, data.edge_weight, self.edge_droprate)
             self.g.clear()
             self.g.add_nodes(data.num_nodes)
             self.g.add_edges(edge_index[0], edge_index[1])
-            self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+            if self.self_loop:
+                self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
             if is_real_weighted_graph:
-                self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+                if self.self_loop:
+                    self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=datax.device)))
+                else:
+                    self.g.edata["weight"] = torch.tensor(edge_weight, dtype=torch.float32, device=datax.device)
         else:
-            x, edge_index, edge_weight = data.x, data.edge_index, data.edge_weight
+            x, edge_index, edge_weight = datax, data.edge_index, data.edge_weight
             if self.g.number_of_nodes() == 0:  # first forward, build the graph once
                 self.g.add_nodes(data.num_nodes)
                 self.g.add_edges(edge_index[0], edge_index[1])
-                self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
+                if self.self_loop:
+                    self.g.add_edges(self.g.nodes(), self.g.nodes())  # add self-loop to avoid invalid normalizer
                 if is_real_weighted_graph:
-                    self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=data.x.device)))
+                    if self.self_loop:
+                        self.g.edata["weight"] = torch.cat((edge_weight, torch.ones(self.g.number_of_nodes(), device=datax.device)))
+                    else:
+                        self.g.edata["weight"] = torch.tensor(edge_weight, dtype=torch.float32, device=datax.device)
 
         deep_x, wide_x, attention = None, None, None
         if self.deep:
@@ -226,9 +278,9 @@ class DGLGCN(torch.nn.Module):
             deep_x = x
 
         if self.wide:
-            wide_x = self.wide_layer(data.x)
+            wide_x = self.wide_layer(datax)
             if self.deep:
-                attention = torch.unsqueeze(F.softmax(self.attention_layer(data.x), dim=-1), dim=1)
+                attention = torch.unsqueeze(F.softmax(self.attention_layer(datax), dim=-1), dim=1)
 
         if self.deep and self.wide:
             return torch.sum(torch.stack([deep_x, wide_x], dim=2) * attention, dim=-1)
@@ -450,16 +502,18 @@ class GCNAlgo(GNNAlgo):
 
         if self.gcn_version == "dgl_gcn":
             self.model = DGLGCN(
-                num_class, features_num, config.get("num_layers", 2),
+                num_class, features_num, config.get("fe", None), config.get("num_layers", 2),
                 config.get("hidden", 16), config.get("hidden_droprate", 0.5),
                 config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-                non_hpo_config.get("directed", False), deep=deep, wide=wide).to(device)
+                non_hpo_config.get("directed", False), deep=deep, wide=wide,
+                self_loop=non_hpo_config.get("self_loop", True)).to(device)
         elif self.gcn_version == "pyg_gcn":
             self.model = GCN(
-                num_class, features_num, config.get("num_layers", 2),
+                num_class, features_num, config.get("fe", None), config.get("num_layers", 2),
                 config.get("hidden", 16), config.get("hidden_droprate", 0.5),
                 config.get("edge_droprate", 0.0), config.get("res_type", 0.0),
-                non_hpo_config.get("directed", False), deep=deep, wide=wide).to(device)
+                non_hpo_config.get("directed", False), deep=deep, wide=wide,
+                self_loop=non_hpo_config.get("self_loop", True)).to(device)
         self._optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config.get("lr", 0.005),

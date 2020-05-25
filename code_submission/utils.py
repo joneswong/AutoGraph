@@ -27,7 +27,9 @@ def fix_seed(seed):
 
 def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_feature_generation=True,
                       use_label_distribution=False, use_node_degree=False, use_node_degree_binary=False,
-                      use_node_embed=True):
+                      use_node_embed=True, use_one_hot_label=False):
+    other_needed = dict()
+
     x = data['fea_table']
 
     df = data['edge_file']
@@ -59,21 +61,37 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
         flag_none_feature = (x.shape[1] == 1)
 
     if use_feature_generation:
+        other_needed["x"] = x
+        other_needed["y"] = y
+        other_needed["n_class"] = n_class
+        other_needed["edge_index"] = edge_index
+        other_needed["edge_weight"] = edge_weight
+        other_needed["time_budget"] = time_budget
+        other_needed["flag_none_feature"] = flag_none_feature
+        other_needed["flag_directed_graph"] = flag_directed_graph
+        other_needed["use_label_distribution"] = use_label_distribution
+        other_needed["use_node_degree"] = use_node_degree
+        other_needed["use_node_degree_binary"] = use_node_degree_binary
+        other_needed["use_node_embed"] = use_node_embed
+        other_needed["use_one_hot_label"] = use_one_hot_label
         added_features = feature_generation(x, y, n_class, edge_index, edge_weight,
                                             flag_none_feature, flag_directed_graph, time_budget,
                                             use_label_distribution=use_label_distribution,
                                             use_node_degree=use_node_degree,
                                             use_node_degree_binary=use_node_degree_binary,
-                                            use_node_embed=use_node_embed)
+                                            use_node_embed=use_node_embed,
+                                            use_one_hot_label=use_one_hot_label)
         if added_features:
             x = np.concatenate([x]+added_features, axis=1)
 
+    only_one_hot_id = False
     if x.shape[1] != 1:
         #remove raw node_index 
         x = x[:,1:]
     else:
         #one hot encoder of node_index (backup plan)
         x = np.eye(num_nodes)
+        only_one_hot_id = True
 
     logger.info('x.shape after feature engineering: {}'.format(x.shape))
     x = torch.tensor(x, dtype=torch.float)
@@ -97,7 +115,7 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
 
     data["directed"] = flag_directed_graph  # used for directed DGL-GCN
 
-    return data
+    return data, other_needed, only_one_hot_id
 
 
 def get_label_weights(train_label, n_class):

@@ -64,13 +64,19 @@ class GeneticOptimizer(Scheduler):
         for key, value in h.items():
             space = self._hyperparam_space[key]
             if isinstance(space, Categoric):
-                cur_index = list(space.categories).index(value)
-                if type(value) is int or type(value) is float:
-                    clip_a, clip_b, mean, std = 0, len(space.categories)-1e-10, cur_index+0.5, len(space.categories)/6
-                    a, b = (clip_a - mean) / std, (clip_b - mean) / std
-                    new_index = int(truncnorm.rvs(a, b, mean, std, random_state=random.randint(0, 1e5)))
-                else:
+                if value not in list(space.categories):
                     new_index = random.randint(0, len(space.categories)-1)
+                else:
+                    cur_index = list(space.categories).index(value)
+                    if type(value) is int or type(value) is float:
+                        clip_a, clip_b, mean, std = 0, len(space.categories)-1e-10, cur_index+0.5, len(space.categories)/6
+                        a, b = (clip_a - mean) / std, (clip_b - mean) / std
+                        new_index = int(truncnorm.rvs(a, b, mean, std, random_state=random.randint(0, 1e5)))
+                    else:
+                        if random.random() < 0.5:
+                            new_index = random.randint(0, len(space.categories)-1)
+                        else:
+                            new_index = cur_index
                 h[key] = space.categories[new_index]
             elif isinstance(space, Numeric):
                 if space.high-space.low != 0:
@@ -89,3 +95,8 @@ class GeneticOptimizer(Scheduler):
         else:
             replaced_index = int(np.argmin([item[1] for item in self._population]))
             self._population[replaced_index] = (copy.deepcopy(self._cur_config), performance)
+
+    def aug_hyperparam_space(self, hyperparam_name, hyperparam_desc, hyperparam_values=None):
+        super(GeneticOptimizer, self).aug_hyperparam_space(hyperparam_name, hyperparam_desc, hyperparam_values)
+        if hyperparam_name not in self._cur_config:
+            self._cur_config[hyperparam_name] = hyperparam_desc.default_value
