@@ -106,12 +106,12 @@ class Model(object):
 
         # make a folder for saving ckpts/outputs
         suffix = str(time.time()).replace('.', '')
-        while os.path.exists("tc"+suffix):
+        while os.path.exists("tc" + suffix):
             suffix = str(time.time()).replace('.', '')
         self._working_folder = ""
         try:
-            os.makedirs("tc"+suffix)
-            self._working_folder = "tc"+suffix
+            os.makedirs("tc" + suffix)
+            self._working_folder = "tc" + suffix
         except FileExistsError as ex:
             logger.exception("folder {} has existed".format("tc".format(suffix)))
         except Exception as ex:
@@ -129,10 +129,12 @@ class Model(object):
         # self.ensembler = ENSEMBLER(
         #     early_stopper=self.ensembler_early_stopper, config_selection='top10', training_strategy='naive')
         self.ensembler = ENSEMBLER(
-            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid', return_best=LOG_BEST)
+            early_stopper=self.ensembler_early_stopper, config_selection='auto', training_strategy='hybrid',
+            return_best=LOG_BEST)
         # schedulers conduct HPO
         # current implementation: HPO for only one model
-        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler, self._working_folder)
+        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler,
+                                    self._working_folder)
         self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
                                'self_loop': True,
                                "gcn_version": GCN_VERSION}
@@ -143,10 +145,10 @@ class Model(object):
             logger.info('copy files failed with error msg: {}'.format(err_msg))
 
     def cp_cnpy_file(self):
-        file_path = os.path.join(os.path.dirname(__file__),'cnpy_file')
+        file_path = os.path.join(os.path.dirname(__file__), 'cnpy_file')
         file_name = ['libcnpy.so', 'libcnpy.a', 'cnpy.h', 'mat2npz', 'npy2mat', 'npz2mat']
         file_name = [os.path.join(file_path, each_file_name) for each_file_name in file_name]
-        
+
         run_commands = ' '.join(['cp', file_name[0], file_name[1], '/usr/local/lib/'])
         cmd_return = subprocess.run(run_commands, shell=True)
 
@@ -155,14 +157,15 @@ class Model(object):
 
         run_commands = ' '.join(['cp', file_name[3], file_name[4], file_name[5], '/usr/local/bin/'])
         cmd_return = subprocess.run(run_commands, shell=True)
-        
-        os.environ['LD_LIBRARY_PATH'] = '%s:%s'%('$LD_LIBRARY_PATH','/usr/local/lib')
+
+        os.environ['LD_LIBRARY_PATH'] = '%s:%s' % ('$LD_LIBRARY_PATH', '/usr/local/lib')
 
     def change_algo(self, ALGO, remain_time_budget):
         self._hyperparam_space = ALGO.hyperparam_space
         logger.info('Change to algo: %s', ALGO)
         logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
-        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler, self._working_folder)
+        self._scheduler = SCHEDULER(copy.deepcopy(self._hyperparam_space), self.hpo_early_stopper, self.ensembler,
+                                    self._working_folder)
         self._scheduler.setup_timer(remain_time_budget)
 
     def train_predict(self, data, time_budget, n_class, schema):
@@ -174,9 +177,13 @@ class Model(object):
         label_weights = get_label_weights(train_y, n_class)
         self.imbalanced_task_type, self.is_minority_class = get_imbalanced_task_type(train_y, n_class)
 
+        edge_index = data['edge_file'][['src_idx', 'dst_idx']].to_numpy()
+        node_with_0_in_degree = np.unique(edge_index[:, 1]).shape[0] != data['fea_table'].shape[0]
+
         if FEATURE_ENGINEERING:
             data, fe_args, only_one_hot_id = generate_pyg_data(
-                data, n_class, time_budget, use_node_embed=False, use_one_hot_label=(self.imbalanced_task_type==2))
+                data, n_class, time_budget, use_node_embed=False,
+                use_one_hot_label=(self.imbalanced_task_type == 2 and not node_with_0_in_degree))
             fe_ready_signal = threading.Event()
             feature_has_been_updated = False
             augmented_features = list()
@@ -216,7 +223,8 @@ class Model(object):
             self._hyperparam_space = ALGO.hyperparam_space
             logger.info('Changed algo hyperparam_space: %s', hyperparam_space_tostr(ALGO.hyperparam_space))
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler,
+                                        self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
 
         global FRAC_FOR_SEARCH
@@ -234,21 +242,26 @@ class Model(object):
                 early_stopper=self.ensembler_early_stopper, config_selection='auto',
                 training_strategy='hpo_trials', return_best=LOG_BEST)
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler,
+                                        self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
             self.non_hpo_config['is_minority'] = self.is_minority_class
         elif self.imbalanced_task_type == 2:
             DATA_SPLIT_RATE = [7, 1, 2]
             LOG_BEST = False
             ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
-            ALGO.hyperparam_space['res_type'] = Categoric([0.], None, 0.)
             ALGO.hyperparam_space['num_layers'] = Categoric(list(range(1, 4)), None, 2)
             ALGO.hyperparam_space['wide_and_deep'] = Categoric(['deep'], None, "deep")
-            ALGO.hyperparam_space['hidden_droprate'] = Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5)
-            self.non_hpo_config['self_loop'] = False
+            if not node_with_0_in_degree:
+                ALGO.hyperparam_space['res_type'] = Categoric([0.], None, 0.)
+                ALGO.hyperparam_space['hidden_droprate'] = Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5)
+                self.non_hpo_config['self_loop'] = False
+            else:
+                ALGO.hyperparam_space['res_type'] = Categoric([0., 1.], None, 0.)
             self._hyperparam_space = ALGO.hyperparam_space
             remain_time_budget = self._scheduler.get_remaining_time()
-            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler, self._working_folder)
+            self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler,
+                                        self._working_folder)
             self._scheduler.setup_timer(remain_time_budget)
 
         train_mask, early_valid_mask, final_valid_mask = None, None, None
@@ -278,7 +291,7 @@ class Model(object):
         if FEATURE_ENGINEERING:
             # we need to update the hyperparam space of our scheduler due to the change of feature space
             self._scheduler.aug_hyperparam_space(
-                "fe", Categoric([":"+str(original_feature_dim)], None, ":"+str(original_feature_dim)))
+                "fe", Categoric([":" + str(original_feature_dim)], None, ":" + str(original_feature_dim)))
 
         algo = None
         tmp_results = None
@@ -291,7 +304,8 @@ class Model(object):
                 early_stop_valid_info = algo.valid(data, early_valid_mask)
                 if LOG_BEST and self._scheduler._early_stopper.should_log(train_info, early_stop_valid_info):
                     tmp_results = algo.pred(data, make_decision=False)
-                    tmp_valid_info = algo.valid(data, final_valid_mask) if DATA_SPLIT_RATE[2] != 0.0 else early_stop_valid_info
+                    tmp_valid_info = algo.valid(data, final_valid_mask) if DATA_SPLIT_RATE[
+                                                                               2] != 0.0 else early_stop_valid_info
                 if self._scheduler.should_stop_trial(train_info, early_stop_valid_info):
                     # valid_info = algo.valid(data, final_valid_mask) if not LOG_BEST else tmp_valid_info
                     valid_info = algo.valid(data, final_valid_mask)
@@ -305,22 +319,23 @@ class Model(object):
                     # augmented features have been generated
                     fe_builder.join()
                     feature_has_been_updated = True
-                    logger.info("====== the feature generation thread completed after {} trials ======".format(len(self._scheduler)))
+                    logger.info("====== the feature generation thread completed after {} trials ======".format(
+                        len(self._scheduler)))
                     if augmented_features:
                         augmented_feature = np.concatenate(augmented_features, axis=1).astype(np.float32)
                         augmented_feature = torch.from_numpy(augmented_feature).to(data.x.device)
                         data.x = torch.cat([data.x, augmented_feature], -1)
                         if not only_one_hot_id:
                             # self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim)+":", ":"])
-                            if self.imbalanced_task_type == 2:
+                            if self.imbalanced_task_type == 2 and not node_with_0_in_degree:
                                 self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim) + ":", ":"])
                             else:
                                 ALGO.hyperparam_space['fe'] = Categoric([":"], None, ":")
                                 self._hyperparam_space = ALGO.hyperparam_space
                                 self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
                         else:
-                            ALGO.hyperparam_space['fe'] = Categoric([str(original_feature_dim)+":"], None,
-                                                                    str(original_feature_dim)+":")
+                            ALGO.hyperparam_space['fe'] = Categoric([str(original_feature_dim) + ":"], None,
+                                                                    str(original_feature_dim) + ":")
                             self._hyperparam_space = ALGO.hyperparam_space
                             self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
 
