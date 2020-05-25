@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import logging
 import torch
 import time
@@ -20,11 +21,13 @@ class Scheduler(object):
     def __init__(self,
                  hyperparam_space,
                  early_stopper,
-                 ensembler):
+                 ensembler,
+                 working_folder):
 
         self._hyperparam_space = hyperparam_space
         self._early_stopper = early_stopper
         self._ensembler = ensembler
+        self._working_folder = working_folder
         self._results = list()
 
     def setup_timer(self, time_budget):
@@ -65,11 +68,13 @@ class Scheduler(object):
     def record(self, algo, valid_info, test_results=None):
         """record (config, ckpt_path, valid_info, #epochs) for a trial"""
 
-        model_path = "team_common_hpo_{}.pt".format(len(self._results))
+        model_path = os.path.join(
+            self._working_folder, "hpo_{}.pt".format(len(self._results)))
         algo.save_model(model_path)
         test_results_path = ''
         if test_results is not None:
-            test_results_path = "test_results_of_hpo_{}.pt".format(len(self._results))
+            test_results_path = os.path.join(
+                self._working_folder, "test_results_of_hpo_{}.pt".format(len(self._results)))
             torch.save({'test_results': test_results}, test_results_path)
         self._results.append((copy.deepcopy(self._cur_config), model_path, valid_info, self._early_stopper.get_cur_step(), test_results_path))
 

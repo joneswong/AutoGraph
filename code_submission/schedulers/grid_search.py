@@ -14,10 +14,11 @@ class GridSearcher(Scheduler):
     def __init__(self,
                  hyperparam_space,
                  early_stopper,
-                 ensembler):
+                 ensembler,
+                 working_folder):
 
         super(GridSearcher, self).__init__(
-            hyperparam_space, early_stopper, ensembler)
+            hyperparam_space, early_stopper, ensembler, working_folder)
 
         # grid search for categorical parameters while the numeric parameters are set as default value
         self.discrete_keys = []

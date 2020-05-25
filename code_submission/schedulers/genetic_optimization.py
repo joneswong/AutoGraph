@@ -18,10 +18,11 @@ class GeneticOptimizer(Scheduler):
                  hyperparam_space,
                  early_stopper,
                  ensembler,
+                 working_folder,
                  max_population=3):
 
         super(GeneticOptimizer, self).__init__(
-            hyperparam_space, early_stopper, ensembler)
+            hyperparam_space, early_stopper, ensembler, working_folder)
 
         for key, value in self._hyperparam_space.items():
             if isinstance(value, Categoric):
