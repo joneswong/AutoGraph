@@ -116,12 +116,12 @@ def get_one_hot_label(y, n_class):
 
     #  y is a tensor having shape [#nodes]
     categorical_y = y.view(-1, 1)
-    categorical_y = categorical_y * (categorical_y < n_class).type(torch.int32)
+    categorical_y = categorical_y * (categorical_y < n_class).type(torch.int64)
     one_hot_label = torch.zeros([n_nodes, n_class], dtype=torch.int32, device=categorical_y.device)
     one_hot_label.scatter_(1, categorical_y, 1)
 
     # mask test sample
-    one_hot_label = one_hot_label * (categorical_y < n_class).float()
+    one_hot_label = one_hot_label.float() * (categorical_y < n_class).float()
     
     # return ndarray to fit to the following "np.concatnation"
     return one_hot_label.numpy()
