@@ -129,13 +129,7 @@ class Model(object):
         self.imbalanced_task_type, self.is_minority_class = get_imbalanced_task_type(train_y, n_class)
 
         if FEATURE_ENGINEERING:
-            data = generate_pyg_data(data, n_class, time_budget,
-                                     use_label_distribution=
-                                     (self.imbalanced_task_type == 2),
-                                     use_node_degree=
-                                     (self.imbalanced_task_type == 2),
-                                     use_node_degree_binary=
-                                     (self.imbalanced_task_type == 2)).to(self.device)
+            data = generate_pyg_data(data, n_class, time_budget).to(self.device)
         else:
             data = generate_pyg_data_without_transform(data).to(self.device)
 
@@ -189,9 +183,12 @@ class Model(object):
             self._scheduler.setup_timer(remain_time_budget)
             self.non_hpo_config['is_minority'] = self.is_minority_class
         elif self.imbalanced_task_type == 2:
+            DATA_SPLIT_RATE = [7, 1, 2]
+            LOG_BEST = False
             ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
-            # ALGO.hyperparam_space['res_type'].default_value = 1.0
-            ALGO.hyperparam_space['wide_and_deep'] = Categoric(['wide_and_deep'], None, "wide_and_deep")
+            ALGO.hyperparam_space['res_type'] = Categoric([0., 1.], None, 0.)
+            ALGO.hyperparam_space['num_layers'] = Categoric(list(range(1, 4)), None, 2)
+            ALGO.hyperparam_space['wide_and_deep'] = Categoric(['deep'], None, "deep")
             self._hyperparam_space = ALGO.hyperparam_space
             remain_time_budget = self._scheduler.get_remaining_time()
             self._scheduler = SCHEDULER(self._hyperparam_space, self.hpo_early_stopper, self.ensembler)

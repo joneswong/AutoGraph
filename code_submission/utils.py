@@ -108,11 +108,11 @@ def get_label_weights(train_label, n_class):
     # is_major = (counts > 100).astype(float)
     # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
 
-    T = 1.0
-    inversed_counts = np.power(inversed_counts, T)
-
     normalize_factor = inversed_counts.sum()
     inversed_counts = inversed_counts / normalize_factor
+
+    T = 0.7
+    inversed_counts = np.power(inversed_counts, T)
 
     # return [1.0 / n_class] * n_class  # the same weights for all label class
     return inversed_counts
