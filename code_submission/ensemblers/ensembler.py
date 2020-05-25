@@ -48,8 +48,7 @@ class Ensembler(object):
         logger.info("to select config(s) from {} candidates".format(len(results)))
         sorted_results = sorted(results, key=lambda x: x[2]['accuracy'])
         self.train_over_all_data = (len(sorted_results) == 1 and sorted_results[0][3] < 200)
-        # for item in sorted_results:
-        #     print(item)
+
         if self._config_selection == 'greedy':
             # choose the best one
             optimal = sorted_results[-1]
@@ -89,7 +88,8 @@ class Ensembler(object):
                 considered.reverse()
                 return considered
         elif self._config_selection == 'auto':
-            reversed_sorted_results = sorted(results, key=lambda x: x[2]['accuracy'], reverse=True)
+            sorted_results.reverse()
+            reversed_sorted_results = sorted_results
 
             # find top k configs automatically
             top_k = 0
