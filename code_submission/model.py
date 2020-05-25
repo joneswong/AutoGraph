@@ -45,7 +45,7 @@ LEARN_FROM_SCRATCH = False
 #  to try set more time budget fot those big graph.
 FRAC_FOR_SEARCH = 0.75
 FIX_FOCAL_LOSS = False
-DATA_SPLIT_RATE = [9, 1, 0]
+DATA_SPLIT_RATE = [7, 1, 2]
 DATA_SPLIT_FOR_EACH_TRIAL = True
 SAVE_TEST_RESULTS = True
 CONSIDER_DIRECTED_GCN = False
