@@ -136,6 +136,7 @@ class Model(object):
             data = generate_pyg_data_without_transform(data).to(self.device)
 
         self.non_hpo_config["label_alpha"] = label_weights
+        is_undirected = not data["directed"]
         # is_undirected = data.is_undirected()
         # data["directed"] = not is_undirected  # used for directed DGL-GCN
 
