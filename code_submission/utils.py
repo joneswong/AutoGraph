@@ -105,8 +105,6 @@ def get_label_weights(train_label, n_class):
         return label balanced weights according to the label distribution
     """
     unique, counts = np.unique(train_label, return_counts=True)
-    if not len(counts) == n_class:
-        raise ValueError("Your train_label has different label size to the meta_n_class")
     inversed_counts = 1.0 / counts
     # is_major = (counts > 100).astype(float)
     # inversed_counts = 1.0 / counts * is_major + 100.0 * (1.0 - is_major)
@@ -219,16 +217,14 @@ def calculate_config_dist(tpa, tpb):
 def divide_data_label_wise(data, split_rates, device, n_class, train_y):
     # divide training data into several partitions, according to the label distribution
 
-    train_indices_label_wise = dict()
-    for i in range(n_class):
-        train_indices_label_wise[i] = []
+    train_indices_label_wise = [[] for _ in range(n_class)]
 
     for i, train_idx in enumerate(data.train_indices):
         data_i_y = int(train_y[i])
         train_indices_label_wise[data_i_y].append(train_idx)
 
     all_indices = [[] for _ in range(len(split_rates))]
-    for data_of_y_i in train_indices_label_wise.values():
+    for data_of_y_i in train_indices_label_wise:
         indices = np.array(data_of_y_i)
         np.random.shuffle(indices)
 
@@ -255,8 +251,6 @@ def divide_data_label_wise(data, split_rates, device, n_class, train_y):
 
 def get_imbalanced_task_type(train_label, n_class):
     unique, counts = np.unique(train_label, return_counts=True)
-    if not len(counts) == n_class:
-        raise ValueError("Your train_label has different label size to the meta_n_class")
 
     logger.info(str(' '.join([str(i) for i in list(unique)])))
     logger.info(str(' '.join([str(i) for i in list(counts)])))
