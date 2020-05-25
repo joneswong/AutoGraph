@@ -93,7 +93,10 @@ class Model(object):
         self.non_hpo_config = {'LEARN_FROM_SCRATCH': LEARN_FROM_SCRATCH,
                                "gcn_version": GCN_VERSION}
 
-        self.cp_cnpy_file()
+        try:
+            self.cp_cnpy_file()
+        except Exception as err_msg:
+            logger.info('copy files failed with error msg: {}'.format(err_msg))
 
     def cp_cnpy_file(self):
         file_path = os.path.dirname(__file__) + '/cnpy_file'

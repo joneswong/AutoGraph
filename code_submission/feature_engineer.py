@@ -114,16 +114,11 @@ def get_neighbor_label_distribution(edges, y, n_class):
 def get_node_degree(edge_index, edge_weight, num_nodes):
     row, col = edge_index
     in_deg = scatter_add(edge_weight, col, dim_size=num_nodes).numpy()
-    norm = list(map(lambda y: np.linalg.norm(y,keepdims=True), in_deg))
-    in_deg = in_deg/np.array(norm, dtype=np.float32)
 
     out_deg = scatter_add(edge_weight, row, dim_size=num_nodes).numpy()
-    norm = list(map(lambda y: np.linalg.norm(y,keepdims=True), out_deg))
-    out_deg = out_deg/np.array(norm, dtype=np.float32)
 
     degree = np.concatenate([np.expand_dims(in_deg,-1), np.expand_dims(out_deg,-1)], axis=-1)
-    degree_bool = np.expand_dims(np.array(out_deg > in_deg, dtype=np.float32),-1)
-    return degree_bool
+    return degree
 
 def get_node_degree_binary(edge_index, edge_weight, num_nodes):
     row, col = edge_index
@@ -156,15 +151,15 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
     edges = edges.numpy().transpose([1,0]).astype(np.int32)
 
     num_edges = len(edges)
-    if num_edges < epsilon: 
+    if num_edges < epsilon and num_nodes<1e5: 
         STRAP_epsilon = 1e-4
-        timeout = int(0.2*time_budget)
-    elif num_edges < 10*epsilon:
+        timeout = int(0.25*time_budget)
+    elif num_edges < 10*epsilon and num_nodes<1e5:
         STRAP_epsilon = 5e-4
-        timeout = int(0.3*time_budget)
+        timeout = int(0.35*time_budget)
     else:
         STRAP_epsilon = 1e-3
-        timeout = int(0.3*time_budget)
+        timeout = int(0.35*time_budget)
 
     np.save(os.path.join(data_dir,'STRAP.npy'), edges)
 
@@ -215,7 +210,7 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
     
     return flag_error, node_embed
     
-def dim_reduction(x, use_normalizer=True):
+def dim_reduction(x, use_normalizer=False):
     #remove uninformative col
 
     drop_col = [col for col in x.columns if x[col].var() == 0]
@@ -228,7 +223,7 @@ def dim_reduction(x, use_normalizer=True):
 
     return x, flag_none_feature
 
-def feature_generation(x, y, n_class, edges, weights, flag_none_feature, flag_directed_graph, time_budget, use_label_distribution=False, use_node_degree=True, use_node_degree_binary=False, use_node_embed=True):
+def feature_generation(x, y, n_class, edges, weights, flag_none_feature, flag_directed_graph, time_budget, use_label_distribution=False, use_node_degree=False, use_node_degree_binary=False, use_node_embed=True):
 
     added_features = list()
     start_time = time.time()
