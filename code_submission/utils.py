@@ -94,6 +94,9 @@ def generate_pyg_data(data, n_class, time_budget, use_dim_reduction=True, use_fe
     test_mask = torch.zeros(num_nodes, dtype=torch.bool)
     test_mask[test_indices] = 1
     data.test_mask = test_mask
+
+    data["directed"] = flag_directed_graph  # used for directed DGL-GCN
+
     return data
 
 
