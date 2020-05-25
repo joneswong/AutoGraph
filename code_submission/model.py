@@ -127,7 +127,6 @@ class Model(object):
         cmd_return = subprocess.run(run_commands, shell=True)
         
         os.environ['LD_LIBRARY_PATH'] = '%s:%s'%('$LD_LIBRARY_PATH','/usr/local/lib')
-        
 
     def change_algo(self, ALGO, remain_time_budget):
         self._hyperparam_space = ALGO.hyperparam_space
@@ -151,10 +150,12 @@ class Model(object):
             data = generate_pyg_data_without_transform(data).to(self.device)
 
         self.non_hpo_config["label_alpha"] = label_weights
-        is_undirected = data.is_undirected()
+        is_undirected = not data["directed"]
+        # is_undirected = data.is_undirected()
+        # data["directed"] = not is_undirected  # used for directed DGL-GCN
+
         is_real_weighted_graph = not (int(torch.sum(data.edge_weight)) == data.edge_index.shape[1])
         data["real_weight_edge"] = is_real_weighted_graph
-        data["directed"] = not is_undirected  # used for directed DGL-GCN
 
         self.non_hpo_config["directed"] = not is_undirected and CONSIDER_DIRECTED_GCN
         logger.info("The graph is {}directed graph".format("un-" if is_undirected else ""))

@@ -369,6 +369,7 @@ class GNNAlgo(object):
         else:
             raise ValueError("You give the wrong loss type. Got {}.".format(self.loss_type))
         loss.backward()
+        torch.nn.utils.clip_grad_value_(self.model.parameters(), 5.0)
         self._optimizer.step()
         # We may need values other than loss for making better decisions on
         # when to stop the training course
@@ -415,7 +416,8 @@ class GCNAlgo(GNNAlgo):
     hyperparam_space = dict(
         num_layers=Categoric(list(range(1, 4)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 32),
-        hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        # hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
+        hidden_droprate=Categoric([0.1, 0.2, 0.3, 0.4, 0.5], None, 0.3),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
         # edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),

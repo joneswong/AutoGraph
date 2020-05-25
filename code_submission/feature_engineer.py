@@ -161,7 +161,7 @@ def run_STRAP(num_nodes, edges, weights, flag_directed_graph, flag_none_feature,
     STRAP_file = 'STRAP_FRPCA_D' if flag_directed_graph else 'STRAP_FRPCA_U'
     try:
         run_commands = ' '.join(['chmod','u+x',os.path.join(file_path,STRAP_file)])
-        cmd_return = subprocess.run(run_commands, shell=True, timeout=1)
+        cmd_return = subprocess.run(run_commands, shell=True, timeout=5)
         #logger.info('chomod commands return: {}'.format(proc.returncode))
 
         run_commands = ' '.join([os.path.join(file_path,STRAP_file),
