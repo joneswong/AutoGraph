@@ -469,7 +469,7 @@ class GCNAlgo(GNNAlgo):
         num_layers=Categoric(list(range(1, 4)), None, 2),
         hidden=Categoric([16, 32, 64, 128], None, 32),
         # hidden_droprate=Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5),
-        hidden_droprate=Categoric([0.1, 0.2, 0.3, 0.4, 0.5], None, 0.3),
+        hidden_droprate=Categoric([0.2, 0.3, 0.4, 0.5], None, 0.4),
         lr=Categoric([5e-4, 1e-3, 2e-3, 5e-3, 1e-2], None, 5e-3),
         weight_decay=Categoric([0., 1e-5, 5e-4, 1e-2], None, 5e-4),
         # edge_droprate=Categoric([0., 0.2, 0.4, 0.5, 0.6], None, 0.0),

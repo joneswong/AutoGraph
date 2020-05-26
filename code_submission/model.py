@@ -236,6 +236,7 @@ class Model(object):
             LOG_BEST = True
             ALGO.hyperparam_space['loss_type'] = Categoric(["focal_loss"], None, "focal_loss")
             ALGO.hyperparam_space['res_type'].default_value = 1.0
+            ALGO.hyperparam_space['hidden_droprate'] = Categoric([0.3, 0.4, 0.5, 0.6], None, 0.5)
             self._hyperparam_space = ALGO.hyperparam_space
             self.hpo_early_stopper = AdaptiveWeightStopper()
             self.ensembler = ENSEMBLER(
@@ -326,13 +327,13 @@ class Model(object):
                         augmented_feature = torch.from_numpy(augmented_feature).to(data.x.device)
                         data.x = torch.cat([data.x, augmented_feature], -1)
                         if not only_one_hot_id:
-                            # self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim)+":", ":"])
-                            if self.imbalanced_task_type == 2 and not node_with_0_in_degree:
-                                self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim) + ":", ":"])
-                            else:
-                                ALGO.hyperparam_space['fe'] = Categoric([":"], None, ":")
-                                self._hyperparam_space = ALGO.hyperparam_space
-                                self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
+                            self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim)+":", ":"])
+                            # if self.imbalanced_task_type == 2 and not node_with_0_in_degree:
+                            #     self._scheduler.aug_hyperparam_space("fe", None, [str(original_feature_dim) + ":", ":"])
+                            # else:
+                            #     ALGO.hyperparam_space['fe'] = Categoric([":"], None, ":")
+                            #     self._hyperparam_space = ALGO.hyperparam_space
+                            #     self._scheduler.update_hyperparam_space('fe', ALGO.hyperparam_space['fe'])
                         else:
                             ALGO.hyperparam_space['fe'] = Categoric([str(original_feature_dim) + ":"], None,
                                                                     str(original_feature_dim) + ":")
