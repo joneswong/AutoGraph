@@ -1,3 +1,14 @@
+The Submission of Team Common
+======================================
+We achieved the 4th place of KDD Cup 2020 AutoGraph Track.
+This repo contains both our submission and the scripts for evaluation.
+Our modules are placed in *code_submission* folder.
+The scripts for evaluation are provided by the competition host.
+Users can directly execute *regression.sh*.
+
+The following explanations are copied from the README of provided *starting_kit*.
+Users can quickly pick up how to use this repo by it.
+
 AutoGraph
 ======================================
 
