@@ -1,15 +1,9 @@
 The Submission of Team Common (from Alibaba Group)
 ======================================
 We achieved the 4th place of [KDD Cup 2020 AutoGraph Track](https://www.4paradigm.com/competition/kddcup2020).
-Our team members:
-- Zhen Wang, Alibaba Inc., China, jones.wz@alibaba-inc.com
-- Daoyuan Chen, Alibaba Inc., China,  daoyuanchen.cdy@alibaba-inc.com
-- Haokun Chen, Alibaba Inc., China,  hankel.chk@alibaba-inc.com
-- Yuexiang Xie, Alibaba Inc., China, yuexiang.xyx@alibaba-inc.com
-- Yaliang Li, Alibaba Inc., China, yaliang.li@alibaba-inc.com
-- Bolin Ding, Alibaba Inc., China, bolin.ding@alibaba-inc.com
-- Wei Lin, Alibaba Inc., China, weilin.lw@alibaba-inc.com
-- Jingren Zhou, Alibaba Inc., China, jingren.zhou@alibaba-inc.com
+Team members:
+<p align="center">Zhen Wang, Daoyuan Chen, Haokun Chen, Yuexiang Xie, Yaliang Li, Bolin Ding, Wei Lin, Jingren Zhou</p>
+<p align="center">Alibaba Group</p>
 
 This repo contains both our submission and the scripts for evaluation.
 Our modules are placed in *code_submission* folder.
