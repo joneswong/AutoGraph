@@ -1,6 +1,6 @@
 The Submission of Team Common (from Alibaba Group)
 ======================================
-We achieved the 4th place of KDD Cup 2020 AutoGraph Track.
+We achieved the 4th place of [KDD Cup 2020 AutoGraph Track](https://www.4paradigm.com/competition/kddcup2020).
 Our team members:
 - Zhen Wang, Alibaba Inc., China, jones.wz@alibaba-inc.com
 - Daoyuan Chen, Alibaba Inc., China,  daoyuanchen.cdy@alibaba-inc.com
